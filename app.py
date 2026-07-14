@@ -1,17 +1,29 @@
 import streamlit as st
-from streamlit_gsheets import GSheetsConnection
+import pandas as pd
+import os
 
 st.set_page_config(page_title="Live Bib Database", layout="wide")
 st.title("🏃‍♂️ Live Bib Search & Status Tracker")
 
-# 1. Establish connection to your Google Sheet
-# Streamlit handles the authentication safely behind the scenes
-conn = st.connection("gsheets", type=GSheetsConnection)
+# File path inside your repository
+DATA_FILE = "participants.csv"
 
-# Read the current data live from the cloud spreadsheet
-df = conn.read(ttl=0) # ttl=0 ensures it pulls live updates without caching data
+# Load the data from the repository file
+if os.path.exists(DATA_FILE):
+    # We load it into session state so it handles quick updates efficiently
+    if "df" not in st.session_state:
+        st.session_state.df = pd.read_csv(DATA_FILE)
+else:
+    st.error("Missing 'participants.csv' file in your directory!")
+    st.stop()
 
-# 2. Search Engine
+df = st.session_state.df
+
+# Ensure columns are typed properly
+df["Status"] = df["Status"].fillna(False).astype(bool)
+df["Bib Number"] = df["Bib Number"].astype(str)
+
+# 1. Search Bar
 search_query = st.text_input("Search by Name or Bib Number").strip().lower()
 
 if search_query:
@@ -22,7 +34,7 @@ if search_query:
 else:
     filtered_df = df
 
-# 3. Interactive Data Grid
+# 2. Interactive Data Grid
 edited_df = st.data_editor(
     filtered_df,
     column_config={
@@ -34,8 +46,7 @@ edited_df = st.data_editor(
     key="live_editor"
 )
 
-# 4. Save Edits Permanently to Google Sheets
-# The moment a checkbox is clicked, this block rewrites the row straight to the cloud
+# 3. Save Changes Instantly to the File
 if st.session_state.get("live_editor"):
     edits = st.session_state["live_editor"]["edited_rows"]
     if edits:
@@ -44,6 +55,6 @@ if st.session_state.get("live_editor"):
                 actual_idx = filtered_df.index[row_index]
                 df.at[actual_idx, "Status"] = changes["Status"]
         
-        # This sends the updated dataframe right back to your live Google Sheet
-        conn.update(data=df)
-        st.success("Database synchronized successfully!")
+        # Save back to the file locally on the cloud server
+        df.to_csv(DATA_FILE, index=False)
+        st.success("Changes saved successfully!")
