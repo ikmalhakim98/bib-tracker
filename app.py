@@ -25,10 +25,8 @@ if st.sidebar.button("🔄 Reset & Pull Fresh Sheet"):
 # Load data (Checks local cache first to maintain ticked boxes across refresh)
 if "df" not in st.session_state:
     if os.path.exists(CACHE_FILE):
-        # Read from local cache if page was refreshed
         df_loaded = pd.read_csv(CACHE_FILE)
     else:
-        # Initial load live from Google Sheets
         try:
             df_loaded = pd.read_csv(CSV_URL)
         except Exception as e:
@@ -43,18 +41,35 @@ if "df" not in st.session_state:
 
 df = st.session_state.df
 
-# 2. Search Bar Engine
-search_query = st.text_input("Search by Name or Bib Number").strip().lower()
+# 2. Search & Filter Controls (Side-by-side)
+col1, col2 = st.columns([3, 1])
 
+with col1:
+    search_query = st.text_input("Search by Name or Bib Number").strip().lower()
+
+with col2:
+    status_filter = st.selectbox(
+        "Filter by Status",
+        options=["All", "Checked In (Ticked)", "Not Checked In (Unticked)"]
+    )
+
+# 3. Apply Filters
+filtered_df = df.copy()
+
+# Filter by Search Text
 if search_query:
-    filtered_df = df[
-        df["Name"].astype(str).str.lower().str.contains(search_query) |
-        df["Bib Number"].astype(str).str.lower().str.contains(search_query)
+    filtered_df = filtered_df[
+        filtered_df["Name"].astype(str).str.lower().str.contains(search_query) |
+        filtered_df["Bib Number"].astype(str).str.lower().str.contains(search_query)
     ]
-else:
-    filtered_df = df
 
-# 3. Interactive Checklist Table
+# Filter by Checked Box Status
+if status_filter == "Checked In (Ticked)":
+    filtered_df = filtered_df[filtered_df["Status"] == True]
+elif status_filter == "Not Checked In (Unticked)":
+    filtered_df = filtered_df[filtered_df["Status"] == False]
+
+# 4. Interactive Checklist Table
 edited_df = st.data_editor(
     filtered_df,
     column_config={
@@ -66,7 +81,7 @@ edited_df = st.data_editor(
     key="sheet_editor"
 )
 
-# 4. Handle Edits & Instantly Save Locally
+# 5. Handle Edits & Instantly Save Locally
 if st.session_state.get("sheet_editor"):
     edits = st.session_state["sheet_editor"]["edited_rows"]
     if edits:
@@ -78,16 +93,14 @@ if st.session_state.get("sheet_editor"):
         # Save to local file so ticks are preserved when you refresh
         st.session_state.df.to_csv(CACHE_FILE, index=False)
 
-# 5. Push changes back to Google Sheets options
+# 6. Push changes back options
 st.markdown("---")
 if st.button("💾 Sync / Export Updated Data"):
     csv_data = st.session_state.df.to_csv(index=False)
     st.info("To apply updates directly to your live Google Sheet, you can either:")
     
-    # Direct copy-paste backup method
     st.text_area("1. Copy this entire updated data block and paste it back over cell A1 in Google Sheets:", csv_data, height=150)
     
-    # Direct export backup
     st.download_button(
         label="2. Download Updated CSV to import back into your Sheet",
         data=csv_data,
