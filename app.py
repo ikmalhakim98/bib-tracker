@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import os
+import urllib.parse
 
 st.set_page_config(page_title="Live Google Sheet Database", layout="wide")
 st.title("🏃‍♂️ Live Bib Search & Status Tracker")
@@ -128,8 +129,69 @@ if st.session_state.get("sheet_editor"):
 
         # Save to local file so ticks are preserved when you refresh
         st.session_state.df.to_csv(CACHE_FILE, index=False)
+        st.rerun()
 
-# 7. Backup & Export
+# 7. SECTION CUSTOM WHATSAPP MESSAGE
+st.markdown("---")
+st.subheader("📲 Send WhatsApp Confirmation")
+
+# Filter peserta yang dah TICK Status = True
+checked_in_participants = st.session_state.df[st.session_state.df["Status"] == True]
+
+if checked_in_participants.empty:
+    st.info("Belum ada peserta yang di-tick Checked In.")
+else:
+    # Dropdown untuk pilih peserta yang dah ticked
+    selected_person_idx = st.selectbox(
+        "Pilih Peserta yang Dah Checked In:",
+        options=checked_in_participants.index,
+        format_func=lambda idx: f"✅ {checked_in_participants.loc[idx, 'Name']} | Phone: {checked_in_participants.loc[idx, 'Phone Number'] if 'Phone Number' in checked_in_participants.columns else 'N/A'}"
+    )
+
+    if selected_person_idx is not None:
+        row = checked_in_participants.loc[selected_person_idx]
+        
+        # Clean & format nombor telefon ke format Malaysia (+60)
+        raw_phone = str(row.get("Phone Number", "")).strip().replace(".0", "")
+        clean_phone = raw_phone.replace("+", "").replace("-", "").replace(" ", "")
+        
+        if clean_phone.startswith("0"):
+            clean_phone = "6" + clean_phone
+        elif clean_phone.startswith("1") and not clean_phone.startswith("60"):
+            clean_phone = "60" + clean_phone
+
+        # Panggil data dari row peserta
+        name = row.get("Name", "Runner")
+        wristband = row.get("Wristband Number", "-")
+        category = row.get("Category", "-")
+
+        # =========================================================
+        # ✏️ UBAH / EDIT CUSTOM MESSAGE WHATSAPP KAU KAT SINI ✏️
+        # =========================================================
+        custom_message = (
+            f"Hai {name}! 👋\n\n"
+            f"Check-In anda telah BERJAYA! 🎉\n\n"
+            f"🏃‍♂️ *Category:* {category}\n"
+            f"🔢 *Wristband Number:* {wristband}\n\n"
+            f"Jumpa anda di flag-off line! Good luck! 🔥"
+        )
+        # =========================================================
+
+        encoded_msg = urllib.parse.quote(custom_message)
+        wa_url = f"https://wa.me/{clean_phone}?text={encoded_msg}"
+
+        # Layout Preview & Button Link
+        wa_col1, wa_col2 = st.columns([3, 1])
+        
+        with wa_col1:
+            st.text_area("Preview Mesej WhatsApp:", custom_message, height=150)
+            
+        with wa_col2:
+            st.write(" ")
+            st.write(" ")
+            st.link_button("🚀 SEND TO WHATSAPP", wa_url, type="primary", use_container_width=True)
+
+# 8. Backup & Export
 st.markdown("---")
 if st.button("💾 Export / Backup Data"):
     csv_data = st.session_state.df.to_csv(index=False)
