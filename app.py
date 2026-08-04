@@ -5,25 +5,33 @@ import os
 st.set_page_config(page_title="Live Google Sheet Database", layout="wide")
 st.title("🏃‍♂️ Live Bib Search & Status Tracker")
 
-# 1. New Google Sheet ID
+# 1. Google Sheet Configuration (Updated Sheet ID and Tab Name)
 SHEET_ID = "1rvpMk2eljyUmcoW1qFh7yk4kY8AWKrygabGCe67bzxU"
 TAB_NAME = "Form responses 1"
 
-# Target Form responses 1 tab directly
+# Target 'Form responses 1' tab using GViz endpoint
 CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={TAB_NAME.replace(' ', '%20')}"
 CACHE_FILE = "checked_in_cache.csv"
 
-# Sidebar controls
-st.sidebar.title("⚙️ Controls")
-if st.sidebar.button("🔄 Force Clear Cache & Reload"):
+# Function to physically delete cache on disk and reset session memory
+def wipe_cache_and_reset():
     if os.path.exists(CACHE_FILE):
-        os.remove(CACHE_FILE)
+        try:
+            os.remove(CACHE_FILE)
+        except Exception as e:
+            st.error(f"Error removing file: {e}")
+            
     for key in list(st.session_state.keys()):
         del st.session_state[key]
-    st.sidebar.success("Cache wiped! Fetching fresh data...")
+
+# Sidebar Controls
+st.sidebar.title("⚙️ Controls")
+if st.sidebar.button("🚨 FORCE WIPE CACHE & LOAD FORM RESPONSES"):
+    wipe_cache_and_reset()
+    st.sidebar.success("Cache deleted! Pulling fresh data from Google Sheet...")
     st.rerun()
 
-# 2. Load Data
+# 2. Load Data Logic
 if "df" not in st.session_state:
     if os.path.exists(CACHE_FILE):
         df_loaded = pd.read_csv(CACHE_FILE)
@@ -31,14 +39,14 @@ if "df" not in st.session_state:
         try:
             df_loaded = pd.read_csv(CSV_URL)
         except Exception as e:
-            st.error("❌ Could not load 'Form responses 1' from Google Sheet.")
-            st.error("Please make sure General Access is set to 'Anyone with the link can view' on Google Sheets.")
+            st.error(f"❌ Could not load '{TAB_NAME}' from Google Sheet.")
+            st.error("Please ensure General Access on the Google Sheet is set to 'Anyone with the link can view'.")
             st.stop()
 
-    # Clean up column whitespace
+    # Clean up column whitespaces
     df_loaded.columns = df_loaded.columns.astype(str).str.strip()
 
-    # Auto-map form headers (finds 'Name' or 'Nama' and 'Bib' columns automatically)
+    # Flexible column mapping (Finds 'Name' / 'Nama' and 'Bib' columns automatically)
     col_mapping = {}
     for col in df_loaded.columns:
         low = col.lower()
@@ -64,10 +72,11 @@ if "df" not in st.session_state:
 df = st.session_state.df
 
 # --- DEBUG INFO HEADER ---
-with st.expander("🔍 Debug Info (Click to see pulled columns)", expanded=False):
+with st.expander("🔍 Debug Info (Click to verify pulled columns)", expanded=True):
+    st.write("**Using Source URL:**", CSV_URL)
     st.write("**Detected Columns:**", list(df.columns))
     st.write("**Total Rows Loaded:**", len(df))
-    st.dataframe(df.head(3))
+    st.dataframe(df.head(5))
 
 # 3. Search & Filter Controls
 col1, col2 = st.columns([3, 1])
@@ -100,7 +109,7 @@ elif status_filter == "Not Checked In (Unticked)":
 
 disabled_cols = [col for col in filtered_df.columns if col != "Status"]
 
-# 5. Interactive Table
+# 5. Interactive Table Editor
 edited_df = st.data_editor(
     filtered_df,
     column_config={
@@ -112,7 +121,7 @@ edited_df = st.data_editor(
     key="sheet_editor"
 )
 
-# 6. Save Edits Locally
+# 6. Handle Edits & Instantly Save Locally
 if st.session_state.get("sheet_editor"):
     edits = st.session_state["sheet_editor"]["edited_rows"]
     if edits:
@@ -121,9 +130,10 @@ if st.session_state.get("sheet_editor"):
                 actual_idx = filtered_df.index[row_index]
                 st.session_state.df.at[actual_idx, "Status"] = changes["Status"]
 
+        # Save to local file so ticks are preserved when you refresh
         st.session_state.df.to_csv(CACHE_FILE, index=False)
 
-# 7. Export Data
+# 7. Backup & Export
 st.markdown("---")
 if st.button("💾 Export / Backup Data"):
     csv_data = st.session_state.df.to_csv(index=False)
