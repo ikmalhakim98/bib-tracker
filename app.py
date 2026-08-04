@@ -5,11 +5,14 @@ import os
 st.set_page_config(page_title="Live Google Sheet Database", layout="wide")
 st.title("🏃‍♂️ Live Bib Search & Status Tracker")
 
-# 1. Input your public Google Sheet URL here
+# 1. Google Sheet URL pointing specifically to 'Form responses 1'
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1JRa7royoM_rVcSaTdw0FmamQRsn1pN9MNsTX-eS2qoU/edit?usp=sharing"
-CSV_URL = SHEET_URL.split("/edit")[0] + "/export?format=csv"
+TAB_NAME = "Form responses 1"
 
-# Local cache file name to retain ticks after refresh
+# Target 'Form responses 1' tab using URL encoding (%20 for space)
+CSV_URL = SHEET_URL.split("/edit")[0] + f"/export?format=csv&sheet={TAB_NAME.replace(' ', '%20')}"
+
+# Local cache file name to retain ticks after browser refresh
 CACHE_FILE = "checked_in_cache.csv"
 
 # Sidebar controls
@@ -30,12 +33,17 @@ if "df" not in st.session_state:
         try:
             df_loaded = pd.read_csv(CSV_URL)
         except Exception as e:
-            st.error("Could not load Google Sheet. Please check the URL and sharing settings.")
+            st.error("Could not load 'Form responses 1' from Google Sheet. Please check your URL, tab name, and sharing settings.")
             st.stop()
 
-    # Clean formatting
+    # Ensure required columns exist and clean formatting
+    if "Status" not in df_loaded.columns:
+        df_loaded["Status"] = False
+
     df_loaded["Status"] = df_loaded["Status"].fillna(False).astype(bool)
-    df_loaded["Bib Number"] = df_loaded["Bib Number"].astype(str).str.replace(r'\.0$', '', regex=True)
+    
+    if "Bib Number" in df_loaded.columns:
+        df_loaded["Bib Number"] = df_loaded["Bib Number"].astype(str).str.replace(r'\.0$', '', regex=True)
     
     st.session_state.df = df_loaded
 
@@ -58,10 +66,9 @@ filtered_df = df.copy()
 
 # Filter by Search Text
 if search_query:
-    filtered_df = filtered_df[
-        filtered_df["Name"].astype(str).str.lower().str.contains(search_query) |
-        filtered_df["Bib Number"].astype(str).str.lower().str.contains(search_query)
-    ]
+    name_mask = filtered_df["Name"].astype(str).str.lower().str.contains(search_query) if "Name" in filtered_df.columns else False
+    bib_mask = filtered_df["Bib Number"].astype(str).str.lower().str.contains(search_query) if "Bib Number" in filtered_df.columns else False
+    filtered_df = filtered_df[name_mask | bib_mask]
 
 # Filter by Checked Box Status
 if status_filter == "Checked In (Ticked)":
@@ -76,7 +83,7 @@ edited_df = st.data_editor(
         "Status": st.column_config.CheckboxColumn("Status (Checked In)", default=False),
         "Bib Number": st.column_config.TextColumn("Bib Number"),
     },
-    disabled=["Name", "Phone Number", "Email", "Bib Number"],
+    disabled=[col for col in filtered_df.columns if col != "Status"],
     use_container_width=True,
     key="sheet_editor"
 )
@@ -99,7 +106,7 @@ if st.button("💾 Sync / Export Updated Data"):
     csv_data = st.session_state.df.to_csv(index=False)
     st.info("To apply updates directly to your live Google Sheet, you can either:")
     
-    st.text_area("1. Copy this entire updated data block and paste it back over cell A1 in Google Sheets:", csv_data, height=150)
+    st.text_area("1. Copy this entire updated data block and paste it back into Google Sheets:", csv_data, height=150)
     
     st.download_button(
         label="2. Download Updated CSV to import back into your Sheet",
