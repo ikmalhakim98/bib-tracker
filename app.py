@@ -46,6 +46,9 @@ if "df" not in st.session_state:
     # Clean up column whitespaces
     df_loaded.columns = df_loaded.columns.astype(str).str.strip()
 
+    # Remove Timestamp column if present
+    df_loaded = df_loaded.drop(columns=["Timestamp"], errors="ignore")
+
     # Flexible column mapping (Finds 'Name' / 'Nama' and 'Bib' columns automatically)
     col_mapping = {}
     for col in df_loaded.columns:
@@ -70,13 +73,6 @@ if "df" not in st.session_state:
     st.session_state.df = df_loaded
 
 df = st.session_state.df
-
-# --- DEBUG INFO HEADER ---
-with st.expander("🔍 Debug Info (Click to verify pulled columns)", expanded=True):
-    st.write("**Using Source URL:**", CSV_URL)
-    st.write("**Detected Columns:**", list(df.columns))
-    st.write("**Total Rows Loaded:**", len(df))
-    st.dataframe(df.head(5))
 
 # 3. Search & Filter Controls
 col1, col2 = st.columns([3, 1])
