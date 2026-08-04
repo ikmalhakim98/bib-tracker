@@ -6,15 +6,14 @@ import urllib.parse
 st.set_page_config(page_title="Live Google Sheet Database", layout="wide")
 st.title("🏃‍♂️ Live Bib Search & Status Tracker")
 
-# 1. Google Sheet Configuration (Updated Sheet ID and Tab Name)
+# 1. Google Sheet Configuration
 SHEET_ID = "1rvpMk2eljyUmcoW1qFh7yk4kY8AWKrygabGCe67bzxU"
 TAB_NAME = "Form responses 1"
 
-# Target 'Form responses 1' tab using GViz endpoint
 CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={TAB_NAME.replace(' ', '%20')}"
 CACHE_FILE = "checked_in_cache.csv"
 
-# Function to physically delete cache on disk and reset session memory
+# Function to wipe cache
 def wipe_cache_and_reset():
     if os.path.exists(CACHE_FILE):
         try:
@@ -50,7 +49,7 @@ if "df" not in st.session_state:
     # Remove Timestamp column if present
     df_loaded = df_loaded.drop(columns=["Timestamp"], errors="ignore")
 
-    # Flexible column mapping (Finds 'Name' / 'Nama' and 'Bib' columns automatically)
+    # Column mapping
     col_mapping = {}
     for col in df_loaded.columns:
         low = col.lower()
@@ -62,11 +61,14 @@ if "df" not in st.session_state:
     if col_mapping:
         df_loaded = df_loaded.rename(columns=col_mapping)
 
-    # Ensure 'Status' column exists
+    # Ensure 'Status' & 'WhatsApp Sent' columns exist
     if "Status" not in df_loaded.columns:
         df_loaded["Status"] = False
+    if "WhatsApp Sent" not in df_loaded.columns:
+        df_loaded["WhatsApp Sent"] = False
 
     df_loaded["Status"] = df_loaded["Status"].fillna(False).astype(bool)
+    df_loaded["WhatsApp Sent"] = df_loaded["WhatsApp Sent"].fillna(False).astype(bool)
 
     if "Bib Number" in df_loaded.columns:
         df_loaded["Bib Number"] = df_loaded["Bib Number"].astype(str).str.replace(r'\.0$', '', regex=True)
@@ -104,13 +106,14 @@ if status_filter == "Checked In (Ticked)":
 elif status_filter == "Not Checked In (Unticked)":
     filtered_df = filtered_df[filtered_df["Status"] == False]
 
-disabled_cols = [col for col in filtered_df.columns if col != "Status"]
+disabled_cols = [col for col in filtered_df.columns if col not in ["Status", "WhatsApp Sent"]]
 
 # 5. Interactive Table Editor
 edited_df = st.data_editor(
     filtered_df,
     column_config={
         "Status": st.column_config.CheckboxColumn("Status (Checked In)", default=False),
+        "WhatsApp Sent": st.column_config.CheckboxColumn("📲 WS Sent?", default=False),
         "Bib Number": st.column_config.TextColumn("Bib Number"),
     },
     disabled=disabled_cols,
@@ -123,51 +126,47 @@ if st.session_state.get("sheet_editor"):
     edits = st.session_state["sheet_editor"]["edited_rows"]
     if edits:
         for row_index, changes in edits.items():
+            actual_idx = filtered_df.index[row_index]
             if "Status" in changes:
-                actual_idx = filtered_df.index[row_index]
                 st.session_state.df.at[actual_idx, "Status"] = changes["Status"]
+            if "WhatsApp Sent" in changes:
+                st.session_state.df.at[actual_idx, "WhatsApp Sent"] = changes["WhatsApp Sent"]
 
-        # Save to local file so ticks are preserved when you refresh
         st.session_state.df.to_csv(CACHE_FILE, index=False)
         st.rerun()
 
-# 7. SECTION CUSTOM WHATSAPP MESSAGE
+# 7. SECTION CUSTOM WHATSAPP MESSAGE (Only Pending Messages Shown)
 st.markdown("---")
 st.subheader("📲 Send WhatsApp Confirmation")
 
-# Filter peserta yang dah TICK Status = True
-checked_in_participants = st.session_state.df[st.session_state.df["Status"] == True]
+# Ambil peserta yang Dah Checked In TAPIIII Belum Hantar WhatsApp
+pending_ws = st.session_state.df[(st.session_state.df["Status"] == True) & (st.session_state.df["WhatsApp Sent"] == False)]
 
-if checked_in_participants.empty:
-    st.info("Belum ada peserta yang di-tick Checked In.")
+if pending_ws.empty:
+    st.success("🎉 Semua peserta yang Checked In telah dihantar WhatsApp!")
 else:
-    # Dropdown untuk pilih peserta yang dah ticked
     selected_person_idx = st.selectbox(
-        "Pilih Peserta yang Dah Checked In:",
-        options=checked_in_participants.index,
-        format_func=lambda idx: f"✅ {checked_in_participants.loc[idx, 'Name']} | Phone: {checked_in_participants.loc[idx, 'Phone Number'] if 'Phone Number' in checked_in_participants.columns else 'N/A'}"
+        "Pilih Peserta yang Belum Dihantar WhatsApp:",
+        options=pending_ws.index,
+        format_func=lambda idx: f"⏳ {pending_ws.loc[idx, 'Name']} | Phone: {pending_ws.loc[idx, 'Phone Number'] if 'Phone Number' in pending_ws.columns else 'N/A'}"
     )
 
     if selected_person_idx is not None:
-        row = checked_in_participants.loc[selected_person_idx]
+        row = pending_ws.loc[selected_person_idx]
         
-        # Clean & format nombor telefon ke format Malaysia (+60)
+        # Clean phone format
         raw_phone = str(row.get("Phone Number", "")).strip().replace(".0", "")
         clean_phone = raw_phone.replace("+", "").replace("-", "").replace(" ", "")
-        
         if clean_phone.startswith("0"):
             clean_phone = "6" + clean_phone
         elif clean_phone.startswith("1") and not clean_phone.startswith("60"):
             clean_phone = "60" + clean_phone
 
-        # Panggil data dari row peserta
         name = row.get("Name", "Runner")
-        wristband = row.get("Wristband Number", "-")
-        category = row.get("Category", "-")
+        wristband = str(row.get("Wristband Number", "-")).replace(".0", "")
+        category = str(row.get("Category", "-")).replace("nan", "-")
 
-        # =========================================================
-        # ✏️ UBAH / EDIT CUSTOM MESSAGE WHATSAPP KAU KAT SINI ✏️
-        # =========================================================
+        # Custom WhatsApp Message
         custom_message = (
             f"Hai {name}! 👋\n\n"
             f"Check-In anda telah BERJAYA! 🎉\n\n"
@@ -175,12 +174,10 @@ else:
             f"🔢 *Wristband Number:* {wristband}\n\n"
             f"Jumpa anda di flag-off line! Good luck! 🔥"
         )
-        # =========================================================
 
         encoded_msg = urllib.parse.quote(custom_message)
         wa_url = f"https://wa.me/{clean_phone}?text={encoded_msg}"
 
-        # Layout Preview & Button Link
         wa_col1, wa_col2 = st.columns([3, 1])
         
         with wa_col1:
@@ -189,7 +186,16 @@ else:
         with wa_col2:
             st.write(" ")
             st.write(" ")
-            st.link_button("🚀 SEND TO WHATSAPP", wa_url, type="primary", use_container_width=True)
+            # Bila tekan link button, kita trigger flag 'Mark as Sent'
+            if st.link_button("🚀 SEND TO WHATSAPP", wa_url, type="primary", use_container_width=True):
+                pass
+            
+            # Button manual mark sent kalau hantar guna phone lain
+            if st.button("✅ Mark as WhatsApp Sent", use_container_width=True):
+                st.session_state.df.at[selected_person_idx, "WhatsApp Sent"] = True
+                st.session_state.df.to_csv(CACHE_FILE, index=False)
+                st.toast(f"Marked WS Sent for {name}!")
+                st.rerun()
 
 # 8. Backup & Export
 st.markdown("---")
