@@ -5,27 +5,25 @@ import os
 st.set_page_config(page_title="Live Google Sheet Database", layout="wide")
 st.title("🏃‍♂️ Live Bib Search & Status Tracker")
 
-# 1. Google Sheet URL configured for 'Form responses 1'
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1JRa7royoM_rVcSaTdw0FmamQRsn1pN9MNsTX-eS2qoU/edit?usp=sharing"
+# 1. New Google Sheet ID
+SHEET_ID = "1rvpMk2eljyUmcoW1qFh7yk4kY8AWKrygabGCe67bzxU"
 TAB_NAME = "Form responses 1"
 
-# Target 'Form responses 1' tab
-CSV_URL = SHEET_URL.split("/edit")[0] + f"/export?format=csv&sheet={TAB_NAME.replace(' ', '%20')}"
-
-# Local cache file name to retain ticks after refresh
+# Target Form responses 1 tab directly
+CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={TAB_NAME.replace(' ', '%20')}"
 CACHE_FILE = "checked_in_cache.csv"
 
 # Sidebar controls
 st.sidebar.title("⚙️ Controls")
-if st.sidebar.button("🔄 Reset & Pull Fresh Sheet"):
+if st.sidebar.button("🔄 Force Clear Cache & Reload"):
     if os.path.exists(CACHE_FILE):
         os.remove(CACHE_FILE)
-    if "df" in st.session_state:
-        del st.session_state["df"]
-    st.sidebar.success("Cache cleared! Re-fetching Google Sheet...")
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    st.sidebar.success("Cache wiped! Fetching fresh data...")
     st.rerun()
 
-# Load data
+# 2. Load Data
 if "df" not in st.session_state:
     if os.path.exists(CACHE_FILE):
         df_loaded = pd.read_csv(CACHE_FILE)
@@ -33,19 +31,20 @@ if "df" not in st.session_state:
         try:
             df_loaded = pd.read_csv(CSV_URL)
         except Exception as e:
-            st.error(f"Could not load '{TAB_NAME}' from Google Sheet. Make sure the sheet sharing is set to 'Anyone with the link can view'.")
+            st.error("❌ Could not load 'Form responses 1' from Google Sheet.")
+            st.error("Please make sure General Access is set to 'Anyone with the link can view' on Google Sheets.")
             st.stop()
 
-    # Clean column names (strip leading/trailing whitespace)
-    df_loaded.columns = df_loaded.columns.str.strip()
+    # Clean up column whitespace
+    df_loaded.columns = df_loaded.columns.astype(str).str.strip()
 
-    # Automatically map common Form field variations to standard names
+    # Auto-map form headers (finds 'Name' or 'Nama' and 'Bib' columns automatically)
     col_mapping = {}
     for col in df_loaded.columns:
-        low_col = col.lower()
-        if "name" in low_col or "nama" in low_col:
+        low = col.lower()
+        if "name" in low or "nama" in low:
             col_mapping[col] = "Name"
-        elif "bib" in low_col:
+        elif "bib" in low:
             col_mapping[col] = "Bib Number"
 
     if col_mapping:
@@ -64,7 +63,13 @@ if "df" not in st.session_state:
 
 df = st.session_state.df
 
-# 2. Search & Filter Controls
+# --- DEBUG INFO HEADER ---
+with st.expander("🔍 Debug Info (Click to see pulled columns)", expanded=False):
+    st.write("**Detected Columns:**", list(df.columns))
+    st.write("**Total Rows Loaded:**", len(df))
+    st.dataframe(df.head(3))
+
+# 3. Search & Filter Controls
 col1, col2 = st.columns([3, 1])
 
 with col1:
@@ -76,7 +81,7 @@ with col2:
         options=["All", "Checked In (Ticked)", "Not Checked In (Unticked)"]
     )
 
-# 3. Apply Filters
+# 4. Filter Logic
 filtered_df = df.copy()
 
 if search_query:
@@ -93,10 +98,9 @@ if status_filter == "Checked In (Ticked)":
 elif status_filter == "Not Checked In (Unticked)":
     filtered_df = filtered_df[filtered_df["Status"] == False]
 
-# Disable editing on all columns except 'Status'
 disabled_cols = [col for col in filtered_df.columns if col != "Status"]
 
-# 4. Interactive Checklist Table
+# 5. Interactive Table
 edited_df = st.data_editor(
     filtered_df,
     column_config={
@@ -108,7 +112,7 @@ edited_df = st.data_editor(
     key="sheet_editor"
 )
 
-# 5. Handle Edits & Save Locally
+# 6. Save Edits Locally
 if st.session_state.get("sheet_editor"):
     edits = st.session_state["sheet_editor"]["edited_rows"]
     if edits:
@@ -119,16 +123,13 @@ if st.session_state.get("sheet_editor"):
 
         st.session_state.df.to_csv(CACHE_FILE, index=False)
 
-# 6. Push changes back options
+# 7. Export Data
 st.markdown("---")
-if st.button("💾 Sync / Export Updated Data"):
+if st.button("💾 Export / Backup Data"):
     csv_data = st.session_state.df.to_csv(index=False)
-    st.info("To apply updates directly to your live Google Sheet, you can either:")
-
-    st.text_area("1. Copy this entire updated data block and paste it back into Google Sheets:", csv_data, height=150)
-
+    st.text_area("Copy updated data:", csv_data, height=150)
     st.download_button(
-        label="2. Download Updated CSV to import back into your Sheet",
+        label="Download CSV",
         data=csv_data,
         file_name="synced_participants.csv",
         mime="text/csv"
