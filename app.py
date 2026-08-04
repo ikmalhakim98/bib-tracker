@@ -6,7 +6,7 @@ st.set_page_config(page_title="Live Google Sheet Database", layout="wide")
 st.title("🏃‍♂️ Live Bib Search & Status Tracker")
 
 # 1. Google Sheet URL pointing specifically to 'Form responses 1'
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1JRa7royoM_rVcSaTdw0FmamQRsn1pN9MNsTX-eS2qoU/edit?usp=sharing"
+SHEET_URL = "https://docs.google.com/spreadsheets/d/1rvpMk2eljyUmcoW1qFh7yk4kY8AWKrygabGCe67bzxU/edit?resourcekey=&gid=985639597#gid=985639597"
 TAB_NAME = "Form responses 1"
 
 # Target 'Form responses 1' tab using URL encoding (%20 for space)
