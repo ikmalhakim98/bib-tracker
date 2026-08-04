@@ -1,27 +1,47 @@
 import streamlit as st
 import pandas as pd
+import os
 
 st.set_page_config(page_title="Live Google Sheet Database", layout="wide")
 st.title("🏃‍♂️ Live Bib Search & Status Tracker")
 
 # 1. Input your public Google Sheet URL here
-# Swap 'edit?usp=sharing' at the end of the link out with 'export?format=csv' so pandas can read/write it directly
 SHEET_URL = "https://docs.google.com/spreadsheets/d/1JRa7royoM_rVcSaTdw0FmamQRsn1pN9MNsTX-eS2qoU/edit?usp=sharing"
 CSV_URL = SHEET_URL.split("/edit")[0] + "/export?format=csv"
 
-# Load data live from Google Sheets
+# Local cache file name to retain ticks after refresh
+CACHE_FILE = "checked_in_cache.csv"
+
+# Sidebar controls
+st.sidebar.title("⚙️ Controls")
+if st.sidebar.button("🔄 Reset & Pull Fresh Sheet"):
+    if os.path.exists(CACHE_FILE):
+        os.remove(CACHE_FILE)
+    if "df" in st.session_state:
+        del st.session_state["df"]
+    st.sidebar.success("Cache cleared! Re-fetching Google Sheet...")
+    st.rerun()
+
+# Load data (Checks local cache first to maintain ticked boxes across refresh)
 if "df" not in st.session_state:
-    try:
-        st.session_state.df = pd.read_csv(CSV_URL)
-    except Exception as e:
-        st.error("Could not load Google Sheet. Please check the URL and sharing settings.")
-        st.stop()
+    if os.path.exists(CACHE_FILE):
+        # Read from local cache if page was refreshed
+        df_loaded = pd.read_csv(CACHE_FILE)
+    else:
+        # Initial load live from Google Sheets
+        try:
+            df_loaded = pd.read_csv(CSV_URL)
+        except Exception as e:
+            st.error("Could not load Google Sheet. Please check the URL and sharing settings.")
+            st.stop()
+
+    # Clean formatting
+    df_loaded["Status"] = df_loaded["Status"].fillna(False).astype(bool)
+    df_loaded["Bib Number"] = df_loaded["Bib Number"].astype(str).str.replace(r'\.0$', '', regex=True)
+    
+    st.session_state.df = df_loaded
 
 df = st.session_state.df
-
-# Clean formatting
-df["Status"] = df["Status"].fillna(False).astype(bool)
-df["Bib Number"] = df["Bib Number"].astype(str).str.replace(r'\.0$', '', regex=True)
 
 # 2. Search Bar Engine
 search_query = st.text_input("Search by Name or Bib Number").strip().lower()
@@ -46,27 +66,25 @@ edited_df = st.data_editor(
     key="sheet_editor"
 )
 
-# 4. Handle Edits
+# 4. Handle Edits & Instantly Save Locally
 if st.session_state.get("sheet_editor"):
     edits = st.session_state["sheet_editor"]["edited_rows"]
     if edits:
         for row_index, changes in edits.items():
             if "Status" in changes:
                 actual_idx = filtered_df.index[row_index]
-                df.at[actual_idx, "Status"] = changes["Status"]
+                st.session_state.df.at[actual_idx, "Status"] = changes["Status"]
         
-        st.success("Changes saved locally! Click below to send updates to Google Sheets.")
+        # Save to local file so ticks are preserved when you refresh
+        st.session_state.df.to_csv(CACHE_FILE, index=False)
 
-# 5. Push changes to Google Sheets
-# Because we are bypassing complex API keys, we add a manual push button 
-# that generates a convenient download link or lets you sync
+# 5. Push changes back to Google Sheets options
 st.markdown("---")
-if st.button("🔄 Sync Changes Back to Google Sheet"):
-    # Convert data back to CSV string
-    csv_data = df.to_csv(index=False)
-    st.info("To apply updates directly to your live Google Sheet without setup, you can either:")
+if st.button("💾 Sync / Export Updated Data"):
+    csv_data = st.session_state.df.to_csv(index=False)
+    st.info("To apply updates directly to your live Google Sheet, you can either:")
     
-    # Simple direct copy-paste backup method
+    # Direct copy-paste backup method
     st.text_area("1. Copy this entire updated data block and paste it back over cell A1 in Google Sheets:", csv_data, height=150)
     
     # Direct export backup
