@@ -163,7 +163,7 @@ else:
             clean_phone = "60" + clean_phone
 
         name = row.get("Name", "Runner")
-        wristband = str(row.get("Wristband Number", "-")).replace(".0", "")
+        wristband = str(row.get("Order ID", "-")).replace(".0", "")
         category = str(row.get("Category", "-")).replace("nan", "-")
 
         # Custom WhatsApp Message
