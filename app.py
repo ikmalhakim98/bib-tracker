@@ -77,13 +77,23 @@ if "df" not in st.session_state:
 
 df = st.session_state.df
 
-# 3. Search & Filter Controls
-col1, col2 = st.columns([3, 1])
+# 3. Search & Filter Controls (Bahagian Baru dengan Filter Category)
+col1, col2, col3 = st.columns([2, 1, 1])
 
 with col1:
     search_query = st.text_input("Search by Name or Bib Number").strip().lower()
 
 with col2:
+    if "Category" in df.columns:
+        valid_cats = df["Category"].dropna().astype(str).str.strip()
+        unique_cats = sorted([c for c in valid_cats.unique() if c and c.lower() not in ["none", "nan"]])
+        cat_options = ["All"] + unique_cats
+    else:
+        cat_options = ["All"]
+
+    selected_category = st.selectbox("Filter by Category", options=cat_options)
+
+with col3:
     status_filter = st.selectbox(
         "Filter by Status",
         options=["All", "Checked In (Ticked)", "Not Checked In (Unticked)"]
@@ -92,15 +102,21 @@ with col2:
 # 4. Filter Logic
 filtered_df = df.copy()
 
+# Filter Search Query
 if search_query:
     has_name = "Name" in filtered_df.columns
     has_bib = "Bib Number" in filtered_df.columns
 
-    name_mask = filtered_df["Name"].astype(str).str.lower().str.contains(search_query) if has_name else False
-    bib_mask = filtered_df["Bib Number"].astype(str).str.lower().str.contains(search_query) if has_bib else False
+    name_mask = filtered_df["Name"].astype(str).lower().str.contains(search_query) if has_name else False
+    bib_mask = filtered_df["Bib Number"].astype(str).lower().str.contains(search_query) if has_bib else False
 
     filtered_df = filtered_df[name_mask | bib_mask]
 
+# Filter Category
+if selected_category != "All" and "Category" in filtered_df.columns:
+    filtered_df = filtered_df[filtered_df["Category"].astype(str).str.strip() == selected_category]
+
+# Filter Status
 if status_filter == "Checked In (Ticked)":
     filtered_df = filtered_df[filtered_df["Status"] == True]
 elif status_filter == "Not Checked In (Unticked)":
@@ -186,11 +202,9 @@ else:
         with wa_col2:
             st.write(" ")
             st.write(" ")
-            # Bila tekan link button, kita trigger flag 'Mark as Sent'
             if st.link_button("🚀 SEND TO WHATSAPP", wa_url, type="primary", use_container_width=True):
                 pass
             
-            # Button manual mark sent kalau hantar guna phone lain
             if st.button("✅ Mark as WhatsApp Sent", use_container_width=True):
                 st.session_state.df.at[selected_person_idx, "WhatsApp Sent"] = True
                 st.session_state.df.to_csv(CACHE_FILE, index=False)
