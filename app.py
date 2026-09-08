@@ -77,7 +77,7 @@ if "df" not in st.session_state:
 
 df = st.session_state.df
 
-# 3. Search & Filter Controls (Bahagian Baru dengan Filter Category)
+# 3. Search & Filter Controls (Multiselect Category)
 col1, col2, col3 = st.columns([2, 1, 1])
 
 with col1:
@@ -87,11 +87,14 @@ with col2:
     if "Category" in df.columns:
         valid_cats = df["Category"].dropna().astype(str).str.strip()
         unique_cats = sorted([c for c in valid_cats.unique() if c and c.lower() not in ["none", "nan"]])
-        cat_options = ["All"] + unique_cats
     else:
-        cat_options = ["All"]
+        unique_cats = []
 
-    selected_category = st.selectbox("Filter by Category", options=cat_options)
+    selected_categories = st.multiselect(
+        "Filter by Category",
+        options=unique_cats,
+        placeholder="All Categories"
+    )
 
 with col3:
     status_filter = st.selectbox(
@@ -112,9 +115,9 @@ if search_query:
 
     filtered_df = filtered_df[name_mask | bib_mask]
 
-# Filter Category
-if selected_category != "All" and "Category" in filtered_df.columns:
-    filtered_df = filtered_df[filtered_df["Category"].astype(str).str.strip() == selected_category]
+# Filter Category (Multiple Selection guna .isin)
+if selected_categories and "Category" in filtered_df.columns:
+    filtered_df = filtered_df[filtered_df["Category"].astype(str).str.strip().isin(selected_categories)]
 
 # Filter Status
 if status_filter == "Checked In (Ticked)":
