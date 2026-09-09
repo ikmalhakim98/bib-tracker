@@ -1,7 +1,7 @@
-import streamlit as st
-import pandas as pd
 import os
 import urllib.parse
+import pandas as pd
+import streamlit as st
 
 st.set_page_config(page_title="Live Google Sheet Database", layout="wide")
 st.title("🏃‍♂️ Live Bib Search & Status Tracker")
@@ -20,7 +20,7 @@ def wipe_cache_and_reset():
             os.remove(CACHE_FILE)
         except Exception as e:
             st.error(f"Error removing file: {e}")
-            
+
     for key in list(st.session_state.keys()):
         del st.session_state[key]
 
@@ -81,7 +81,7 @@ df = st.session_state.df
 col1, col2, col3 = st.columns([2, 1, 1])
 
 with col1:
-    search_query = st.text_input("Search by Name or Bib Number").strip().lower()
+    search_query = st.text_input("Search by Name or Bib Number").strip()
 
 with col2:
     if "Category" in df.columns:
@@ -110,8 +110,9 @@ if search_query:
     has_name = "Name" in filtered_df.columns
     has_bib = "Bib Number" in filtered_df.columns
 
-    name_mask = filtered_df["Name"].astype(str).lower().str.contains(search_query) if has_name else False
-    bib_mask = filtered_df["Bib Number"].astype(str).lower().str.contains(search_query) if has_bib else False
+    # Gunakan case=False dan na=False supaya carian case-insensitive & kebal error null
+    name_mask = filtered_df["Name"].astype(str).str.contains(search_query, case=False, na=False) if has_name else False
+    bib_mask = filtered_df["Bib Number"].astype(str).str.contains(search_query, case=False, na=False) if has_bib else False
 
     filtered_df = filtered_df[name_mask | bib_mask]
 
@@ -172,7 +173,7 @@ else:
 
     if selected_person_idx is not None:
         row = pending_ws.loc[selected_person_idx]
-        
+
         # Clean phone format
         raw_phone = str(row.get("Phone Number", "")).strip().replace(".0", "")
         clean_phone = raw_phone.replace("+", "").replace("-", "").replace(" ", "")
@@ -198,16 +199,16 @@ else:
         wa_url = f"https://wa.me/{clean_phone}?text={encoded_msg}"
 
         wa_col1, wa_col2 = st.columns([3, 1])
-        
+
         with wa_col1:
             st.text_area("Preview Mesej WhatsApp:", custom_message, height=150)
-            
+
         with wa_col2:
             st.write(" ")
             st.write(" ")
             if st.link_button("🚀 SEND TO WHATSAPP", wa_url, type="primary", use_container_width=True):
                 pass
-            
+
             if st.button("✅ Mark as WhatsApp Sent", use_container_width=True):
                 st.session_state.df.at[selected_person_idx, "WhatsApp Sent"] = True
                 st.session_state.df.to_csv(CACHE_FILE, index=False)
