@@ -129,7 +129,7 @@ with col2:
 with col3:
     status_filter = st.selectbox(
         "Filter by Status",
-        options=["All", "Checked In (Ticked)", "Not Checked In (Unticked)"]
+        options=["All", "Collected (Ticked)", "Not Collected (Unticked)"]
     )
 
 # 4. Filter Logic
@@ -147,9 +147,9 @@ if search_query:
 if selected_categories and "Category" in filtered_df.columns:
     filtered_df = filtered_df[filtered_df["Category"].astype(str).str.strip().isin(selected_categories)]
 
-if status_filter == "Checked In (Ticked)":
+if status_filter == " (Ticked)":
     filtered_df = filtered_df[filtered_df["Status"] == True]
-elif status_filter == "Not Checked In (Unticked)":
+elif status_filter == "Not Collected (Unticked)":
     filtered_df = filtered_df[filtered_df["Status"] == False]
 
 disabled_cols = [col for col in filtered_df.columns if col not in ["Status", "WhatsApp Sent"]]
@@ -158,7 +158,7 @@ disabled_cols = [col for col in filtered_df.columns if col not in ["Status", "Wh
 edited_df = st.data_editor(
     filtered_df,
     column_config={
-        "Status": st.column_config.CheckboxColumn("Status (Checked In)", default=False),
+        "Status": st.column_config.CheckboxColumn("Status (Collected)", default=False),
         "WhatsApp Sent": st.column_config.CheckboxColumn("📲 WS Sent?", default=False),
         "Bib Number": st.column_config.TextColumn("Bib Number"),
         "Consent": None,  # Sembunyikan sekiranya masih ada dalam cache lama
@@ -189,7 +189,7 @@ st.subheader("📲 Send WhatsApp Confirmation")
 pending_ws = st.session_state.df[(st.session_state.df["Status"] == True) & (st.session_state.df["WhatsApp Sent"] == False)]
 
 if pending_ws.empty:
-    st.success("🎉 Semua peserta yang Checked In telah dihantar WhatsApp!")
+    st.success("🎉 Semua peserta yang  telah dihantar WhatsApp!")
 else:
     def get_dropdown_label(idx):
         p_name = pending_ws.loc[idx, "Name"] if "Name" in pending_ws.columns else "Runner"
