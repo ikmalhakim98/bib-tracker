@@ -64,10 +64,14 @@ if "df" not in st.session_state:
     df_loaded = df_loaded.loc[:, ~df_loaded.columns.str.startswith("Unnamed")]
     df_loaded = df_loaded.loc[:, df_loaded.columns != ""]
 
-    # Buang lajur Timestamp & Consent
-    df_loaded = df_loaded.drop(columns=["Timestamp", "Consent"], errors="ignore")
+    # Buang lajur Timestamp & sebarang lajur berkaitan Consent / Column 7
+    cols_to_drop = [
+        col for col in df_loaded.columns 
+        if any(term in col.lower() for term in ["timestamp", "consent", "column 7", "confirm", "setuju"])
+    ]
+    df_loaded = df_loaded.drop(columns=cols_to_drop, errors="ignore")
 
-    # Column mapping selamat (Auto-detect Name, Wristband/Wistband, Phone tanpa duplicate)
+    # Column mapping selamat (Auto-detect Name, Wristband/Bib, Phone)
     col_mapping = {}
     found_name = False
     found_wristband = False
@@ -111,7 +115,7 @@ df = st.session_state.df
 col1, col2, col3 = st.columns([2, 1, 1])
 
 with col1:
-    search_query = st.text_input("Search by Name or Wristband Number").strip()
+    search_query = st.text_input("Search by Name, Wristband, or Phone Number").strip()
 
 with col2:
     if "Category" in df.columns:
@@ -132,12 +136,13 @@ with col3:
         options=["All", "Collected (Ticked)", "Not Collected (Unticked)"]
     )
 
-# 4. Filter Logic (Kebal Jenis Data & Carian Tepat)
+# 4. Filter Logic (Menyokong Name, Wristband, dan Phone Number)
 filtered_df = df.copy()
 
 if search_query:
     has_name = "Name" in filtered_df.columns
     has_wristband = "Wristband Number" in filtered_df.columns
+    has_phone = "Phone Number" in filtered_df.columns
 
     if has_name:
         name_clean = filtered_df["Name"].fillna("").astype(str).str.strip()
@@ -153,7 +158,14 @@ if search_query:
     else:
         wristband_mask = False
 
-    filtered_df = filtered_df[name_mask | wristband_mask]
+    if has_phone:
+        phone_clean = filtered_df["Phone Number"].fillna("").astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
+        phone_clean = phone_clean.replace(["None", "nan", "<NA>"], "")
+        phone_mask = phone_clean.str.contains(search_query, case=False, na=False)
+    else:
+        phone_mask = False
+
+    filtered_df = filtered_df[name_mask | wristband_mask | phone_mask]
 
 if selected_categories and "Category" in filtered_df.columns:
     filtered_df = filtered_df[filtered_df["Category"].astype(str).str.strip().isin(selected_categories)]
@@ -172,7 +184,7 @@ edited_df = st.data_editor(
         "Status": st.column_config.CheckboxColumn("Status (Collected)", default=False),
         "WhatsApp Sent": st.column_config.CheckboxColumn("📲 WS Sent?", default=False),
         "Wristband Number": st.column_config.TextColumn("Wristband Number"),
-        "Consent": None,
+        "Phone Number": st.column_config.TextColumn("Phone Number"),
     },
     disabled=disabled_cols,
     use_container_width=True,
