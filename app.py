@@ -188,11 +188,9 @@ else:
 
         # Custom WhatsApp Message
         custom_message = (
-            f"Hai {name}! 👋\n\n"
-            f"Check-In anda telah BERJAYA! 🎉\n\n"
-            f"🏃‍♂️ *Category:* {category}\n"
-            f"🔢 *Wristband Number:* {wristband}\n\n"
-            f"Jumpa anda di flag-off line! Good luck! 🔥"
+            f"Hi {name}! 👋\n\n"
+            f"You have collected your medal! 🎉\n\n"
+            f"Congratulations on your achievement!"
         )
 
         encoded_msg = urllib.parse.quote(custom_message)
