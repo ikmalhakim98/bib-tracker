@@ -49,7 +49,7 @@ if "df" not in st.session_state:
     # Remove Timestamp column if present
     df_loaded = df_loaded.drop(columns=["Timestamp"], errors="ignore")
 
-    # Column mapping
+    # Column mapping (Auto-detect Name, Bib, dan Phone)
     col_mapping = {}
     for col in df_loaded.columns:
         low = col.lower()
@@ -57,6 +57,8 @@ if "df" not in st.session_state:
             col_mapping[col] = "Name"
         elif "bib" in low:
             col_mapping[col] = "Bib Number"
+        elif any(k in low for k in ["phone", "tel", "contact", "mobile", "whatsapp"]):
+            col_mapping[col] = "Phone Number"
 
     if col_mapping:
         df_loaded = df_loaded.rename(columns=col_mapping)
@@ -110,7 +112,6 @@ if search_query:
     has_name = "Name" in filtered_df.columns
     has_bib = "Bib Number" in filtered_df.columns
 
-    # Gunakan case=False dan na=False supaya carian case-insensitive & kebal error null
     name_mask = filtered_df["Name"].astype(str).str.contains(search_query, case=False, na=False) if has_name else False
     bib_mask = filtered_df["Bib Number"].astype(str).str.contains(search_query, case=False, na=False) if has_bib else False
 
@@ -165,18 +166,33 @@ pending_ws = st.session_state.df[(st.session_state.df["Status"] == True) & (st.s
 if pending_ws.empty:
     st.success("🎉 Semua peserta yang Checked In telah dihantar WhatsApp!")
 else:
+    # Function untuk format label dropdown dengan bersih
+    def get_dropdown_label(idx):
+        p_name = pending_ws.loc[idx, "Name"] if "Name" in pending_ws.columns else "Runner"
+        if "Phone Number" in pending_ws.columns and pd.notna(pending_ws.loc[idx, "Phone Number"]):
+            p_phone = str(pending_ws.loc[idx, "Phone Number"]).strip().replace(".0", "")
+            if not p_phone or p_phone.lower() == "nan":
+                p_phone = "N/A"
+        else:
+            p_phone = "N/A"
+        return f"⏳ {p_name} | Phone: {p_phone}"
+
     selected_person_idx = st.selectbox(
         "Pilih Peserta yang Belum Dihantar WhatsApp:",
         options=pending_ws.index,
-        format_func=lambda idx: f"⏳ {pending_ws.loc[idx, 'Name']} | Phone: {pending_ws.loc[idx, 'Phone Number'] if 'Phone Number' in pending_ws.columns else 'N/A'}"
+        format_func=get_dropdown_label
     )
 
     if selected_person_idx is not None:
         row = pending_ws.loc[selected_person_idx]
 
         # Clean phone format
-        raw_phone = str(row.get("Phone Number", "")).strip().replace(".0", "")
-        clean_phone = raw_phone.replace("+", "").replace("-", "").replace(" ", "")
+        raw_phone = ""
+        if "Phone Number" in row and pd.notna(row["Phone Number"]):
+            raw_phone = str(row["Phone Number"]).strip().replace(".0", "")
+
+        # Buang semua simbol bukan digit (+, -, ruang kosong, dll.)
+        clean_phone = "".join(filter(str.isdigit, raw_phone))
         if clean_phone.startswith("0"):
             clean_phone = "6" + clean_phone
         elif clean_phone.startswith("1") and not clean_phone.startswith("60"):
