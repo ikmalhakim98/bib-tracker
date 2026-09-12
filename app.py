@@ -104,20 +104,17 @@ if "df" not in st.session_state:
     df_loaded["Status"] = df_loaded["Status"].fillna(False).astype(str).str.lower().isin(["true", "1", "yes"])
     df_loaded["WhatsApp Sent"] = df_loaded["WhatsApp Sent"].fillna(False).astype(str).str.lower().isin(["true", "1", "yes"])
 
-    # Kekalkan leading zero untuk Wristband Number (cth: 06600)
+    # Bersihkan Wristband Number tanpa menambah angka 0 di depan
     if "Wristband Number" in df_loaded.columns:
-        def preserve_wristband(val):
+        def clean_wristband(val):
             if pd.isna(val):
                 return None
             s = str(val).strip().replace(".0", "")
             if s.lower() in ["none", "nan", ""]:
                 return None
-            # Jika ada 4 digit nombor sahaja, tambah 0 di depan
-            if s.isdigit() and len(s) == 4:
-                return s.zfill(5)
             return s
 
-        df_loaded["Wristband Number"] = df_loaded["Wristband Number"].apply(preserve_wristband)
+        df_loaded["Wristband Number"] = df_loaded["Wristband Number"].apply(clean_wristband)
 
     st.session_state.df = df_loaded
 
