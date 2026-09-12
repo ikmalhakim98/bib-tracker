@@ -4,13 +4,9 @@ import urllib.parse
 import urllib.request
 import pandas as pd
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Medal Engraving & Status Tracker", layout="wide")
 st.title("🏃‍♂️ Medal Engraving & Status Tracker")
-
-# Auto-refresh aplikasi setiap 15 saat di latar belakang
-st_autorefresh(interval=15000, key="auto_sheet_sync")
 
 # 1. Google Sheet Configuration
 SHEET_ID = "1rvpMk2eljyUmcoW1qFh7yk4kY8AWKrygabGCe67bzxU"
@@ -98,231 +94,237 @@ def clean_sheet_dataframe(raw_df):
 
     return df_clean
 
-# 2. Sync / Merge Data Logic
-fresh_df = None
-try:
-    fresh_raw = fetch_sheet_csv(CSV_URL, FALLBACK_URL)
-    fresh_df = clean_sheet_dataframe(fresh_raw)
-except Exception:
-    pass
+# 2. Fungsi Sync / Merge Data Berkala
+def sync_data():
+    fresh_df = None
+    try:
+        fresh_raw = fetch_sheet_csv(CSV_URL, FALLBACK_URL)
+        fresh_df = clean_sheet_dataframe(fresh_raw)
+    except Exception:
+        pass
 
-# Baca data sedia ada dari Session State atau Fail Cache
-if "df" not in st.session_state:
-    if os.path.exists(CACHE_FILE):
-        existing_df = pd.read_csv(CACHE_FILE, dtype=str)
-    elif fresh_df is not None:
-        fresh_df["Status"] = False
-        fresh_df["WhatsApp Sent"] = False
-        existing_df = fresh_df
-        existing_df.to_csv(CACHE_FILE, index=False)
-    else:
-        st.error(f"❌ Gagal menyambung ke '{TAB_NAME}' di Google Sheet.")
-        st.stop()
-    st.session_state.df = existing_df
-
-# Merge baris baharu dari Google Sheet tanpa menimpa status tick sedia ada
-if fresh_df is not None and not fresh_df.empty:
-    current_df = st.session_state.df.copy()
-
-    # Bina komposit ID selamat (gabungan Name + Phone + Wristband) supaya tepat
-    def create_row_id(row):
-        name_val = str(row.get("Name", "")).strip().lower()
-        phone_val = str(row.get("Phone Number", "")).strip()
-        wrist_val = str(row.get("Wristband Number", "")).strip()
-        return f"{name_val}_{phone_val}_{wrist_val}"
-
-    current_ids = set(current_df.apply(create_row_id, axis=1))
-    fresh_ids = fresh_df.apply(create_row_id, axis=1)
-
-    new_entries = fresh_df[~fresh_ids.isin(current_ids)].copy()
-
-    if not new_entries.empty:
-        new_entries["Status"] = False
-        new_entries["WhatsApp Sent"] = False
-        current_df = pd.concat([current_df, new_entries], ignore_index=True)
-        st.session_state.df = current_df
-        st.session_state.df.to_csv(CACHE_FILE, index=False)
-
-# Pastikan status wujud dalam format boolean
-df = st.session_state.df
-if "Status" not in df.columns:
-    df["Status"] = False
-if "WhatsApp Sent" not in df.columns:
-    df["WhatsApp Sent"] = False
-
-df["Status"] = df["Status"].fillna(False).astype(str).str.lower().isin(["true", "1", "yes"])
-df["WhatsApp Sent"] = df["WhatsApp Sent"].fillna(False).astype(str).str.lower().isin(["true", "1", "yes"])
-st.session_state.df = df
-
-# 3. Search & Filter Controls
-col1, col2, col3 = st.columns([2, 1, 1])
-
-with col1:
-    search_query = st.text_input("Search by Name, Wristband, or Phone Number").strip()
-
-with col2:
-    if "Category" in df.columns:
-        valid_cats = df["Category"].dropna().astype(str).str.strip()
-        unique_cats = sorted([c for c in valid_cats.unique() if c and c.lower() not in ["none", "nan"]])
-    else:
-        unique_cats = []
-
-    selected_categories = st.multiselect(
-        "Filter by Category",
-        options=unique_cats,
-        placeholder="All Categories"
-    )
-
-with col3:
-    status_filter = st.selectbox(
-        "Filter by Status",
-        options=["All", "Collected (Ticked)", "Not Collected (Unticked)"]
-    )
-
-# 4. Filter Logic (Menyokong Name, Wristband, dan Phone Number)
-filtered_df = df.copy()
-
-if search_query:
-    has_name = "Name" in filtered_df.columns
-    has_wristband = "Wristband Number" in filtered_df.columns
-    has_phone = "Phone Number" in filtered_df.columns
-
-    if has_name:
-        name_clean = filtered_df["Name"].fillna("").astype(str).str.strip()
-        name_clean = name_clean.replace(["None", "nan", "<NA>"], "")
-        name_mask = name_clean.str.contains(search_query, case=False, na=False)
-    else:
-        name_mask = False
-
-    if has_wristband:
-        wrist_clean = filtered_df["Wristband Number"].fillna("").astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
-        wrist_clean = wrist_clean.replace(["None", "nan", "<NA>"], "")
-        wristband_mask = wrist_clean.str.contains(search_query, case=False, na=False)
-    else:
-        wristband_mask = False
-
-    if has_phone:
-        phone_clean = filtered_df["Phone Number"].fillna("").astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
-        phone_clean = phone_clean.replace(["None", "nan", "<NA>"], "")
-        phone_mask = phone_clean.str.contains(search_query, case=False, na=False)
-    else:
-        phone_mask = False
-
-    filtered_df = filtered_df[name_mask | wristband_mask | phone_mask]
-
-if selected_categories and "Category" in filtered_df.columns:
-    filtered_df = filtered_df[filtered_df["Category"].astype(str).str.strip().isin(selected_categories)]
-
-if status_filter == "Collected (Ticked)":
-    filtered_df = filtered_df[filtered_df["Status"] == True]
-elif status_filter == "Not Collected (Unticked)":
-    filtered_df = filtered_df[filtered_df["Status"] == False]
-
-disabled_cols = [col for col in filtered_df.columns if col not in ["Status", "WhatsApp Sent"]]
-
-# 5. Interactive Table Editor
-edited_df = st.data_editor(
-    filtered_df,
-    column_config={
-        "Status": st.column_config.CheckboxColumn("Status (Collected)", default=False),
-        "WhatsApp Sent": st.column_config.CheckboxColumn("📲 WS Sent?", default=False),
-        "Wristband Number": st.column_config.TextColumn("Wristband Number"),
-        "Phone Number": st.column_config.TextColumn("Phone Number"),
-        "Email address": None,
-    },
-    disabled=disabled_cols,
-    use_container_width=True,
-    key="sheet_editor"
-)
-
-# 6. Handle Edits & Instantly Save Locally
-if st.session_state.get("sheet_editor"):
-    edits = st.session_state["sheet_editor"]["edited_rows"]
-    if edits:
-        for row_index, changes in edits.items():
-            actual_idx = filtered_df.index[row_index]
-            if "Status" in changes:
-                st.session_state.df.at[actual_idx, "Status"] = changes["Status"]
-            if "WhatsApp Sent" in changes:
-                st.session_state.df.at[actual_idx, "WhatsApp Sent"] = changes["WhatsApp Sent"]
-
-        st.session_state.df.to_csv(CACHE_FILE, index=False)
-        st.rerun()
-
-# 7. SECTION CUSTOM WHATSAPP MESSAGE
-st.markdown("---")
-st.subheader("📲 Send WhatsApp Confirmation")
-
-pending_ws = st.session_state.df[(st.session_state.df["Status"] == True) & (st.session_state.df["WhatsApp Sent"] == False)]
-
-if pending_ws.empty:
-    st.success("🎉 Semua peserta yang Collected telah dihantar WhatsApp!")
-else:
-    def get_dropdown_label(idx):
-        p_name = pending_ws.loc[idx, "Name"] if "Name" in pending_ws.columns else "Runner"
-        if "Phone Number" in pending_ws.columns and pd.notna(pending_ws.loc[idx, "Phone Number"]):
-            p_phone = str(pending_ws.loc[idx, "Phone Number"]).strip().replace(".0", "")
-            if not p_phone or p_phone.lower() == "nan":
-                p_phone = "N/A"
+    if "df" not in st.session_state:
+        if os.path.exists(CACHE_FILE):
+            existing_df = pd.read_csv(CACHE_FILE, dtype=str)
+        elif fresh_df is not None:
+            fresh_df["Status"] = False
+            fresh_df["WhatsApp Sent"] = False
+            existing_df = fresh_df
+            existing_df.to_csv(CACHE_FILE, index=False)
         else:
-            p_phone = "N/A"
-        return f"⏳ {p_name} | Phone: {p_phone}"
+            st.error(f"❌ Gagal menyambung ke '{TAB_NAME}' di Google Sheet.")
+            st.stop()
+        st.session_state.df = existing_df
 
-    selected_person_idx = st.selectbox(
-        "Pilih Peserta yang Belum Dihantar WhatsApp:",
-        options=pending_ws.index,
-        format_func=get_dropdown_label
-    )
+    if fresh_df is not None and not fresh_df.empty:
+        current_df = st.session_state.df.copy()
 
-    if selected_person_idx is not None:
-        row = pending_ws.loc[selected_person_idx]
+        def create_row_id(row):
+            name_val = str(row.get("Name", "")).strip().lower()
+            phone_val = str(row.get("Phone Number", "")).strip()
+            wrist_val = str(row.get("Wristband Number", "")).strip()
+            return f"{name_val}_{phone_val}_{wrist_val}"
 
-        raw_phone = ""
-        if "Phone Number" in row and pd.notna(row["Phone Number"]):
-            raw_phone = str(row["Phone Number"]).strip().replace(".0", "")
+        current_ids = set(current_df.apply(create_row_id, axis=1))
+        fresh_ids = fresh_df.apply(create_row_id, axis=1)
 
-        clean_phone = "".join(filter(str.isdigit, raw_phone))
-        if clean_phone.startswith("0"):
-            clean_phone = "6" + clean_phone
-        elif clean_phone.startswith("1") and not clean_phone.startswith("60"):
-            clean_phone = "60" + clean_phone
+        new_entries = fresh_df[~fresh_ids.isin(current_ids)].copy()
 
-        name = row.get("Name", "Runner")
+        if not new_entries.empty:
+            new_entries["Status"] = False
+            new_entries["WhatsApp Sent"] = False
+            current_df = pd.concat([current_df, new_entries], ignore_index=True)
+            st.session_state.df = current_df
+            st.session_state.df.to_csv(CACHE_FILE, index=False)
 
-        custom_message = (
-            f"Hi {name}! \n\n"
-            f"You have collected your medal! \n\n"
-            f"Congratulations on your achievement!"
+    df_active = st.session_state.df
+    if "Status" not in df_active.columns:
+        df_active["Status"] = False
+    if "WhatsApp Sent" not in df_active.columns:
+        df_active["WhatsApp Sent"] = False
+
+    df_active["Status"] = df_active["Status"].fillna(False).astype(str).str.lower().isin(["true", "1", "yes"])
+    df_active["WhatsApp Sent"] = df_active["WhatsApp Sent"].fillna(False).astype(str).str.lower().isin(["true", "1", "yes"])
+    st.session_state.df = df_active
+
+# Fragment ini berjalan secara automatik setiap 15 saat tanpa library tambahan
+@st.fragment(run_every=15)
+def main_tracker_ui():
+    sync_data()
+    df = st.session_state.df
+
+    # 3. Search & Filter Controls
+    col1, col2, col3 = st.columns([2, 1, 1])
+
+    with col1:
+        search_query = st.text_input("Search by Name, Wristband, or Phone Number").strip()
+
+    with col2:
+        if "Category" in df.columns:
+            valid_cats = df["Category"].dropna().astype(str).str.strip()
+            unique_cats = sorted([c for c in valid_cats.unique() if c and c.lower() not in ["none", "nan"]])
+        else:
+            unique_cats = []
+
+        selected_categories = st.multiselect(
+            "Filter by Category",
+            options=unique_cats,
+            placeholder="All Categories"
         )
 
-        encoded_msg = urllib.parse.quote(custom_message)
-        wa_url = f"https://wa.me/{clean_phone}?text={encoded_msg}"
+    with col3:
+        status_filter = st.selectbox(
+            "Filter by Status",
+            options=["All", "Collected (Ticked)", "Not Collected (Unticked)"]
+        )
 
-        wa_col1, wa_col2 = st.columns([3, 1])
+    # 4. Filter Logic
+    filtered_df = df.copy()
 
-        with wa_col1:
-            st.text_area("Preview Mesej WhatsApp:", custom_message, height=150)
+    if search_query:
+        has_name = "Name" in filtered_df.columns
+        has_wristband = "Wristband Number" in filtered_df.columns
+        has_phone = "Phone Number" in filtered_df.columns
 
-        with wa_col2:
-            st.write(" ")
-            st.write(" ")
-            if st.link_button("🚀 SEND TO WHATSAPP", wa_url, type="primary", use_container_width=True):
-                pass
+        if has_name:
+            name_clean = filtered_df["Name"].fillna("").astype(str).str.strip()
+            name_clean = name_clean.replace(["None", "nan", "<NA>"], "")
+            name_mask = name_clean.str.contains(search_query, case=False, na=False)
+        else:
+            name_mask = False
 
-            if st.button("✅ Mark as WhatsApp Sent", use_container_width=True):
-                st.session_state.df.at[selected_person_idx, "WhatsApp Sent"] = True
-                st.session_state.df.to_csv(CACHE_FILE, index=False)
-                st.toast(f"Marked WS Sent for {name}!")
-                st.rerun()
+        if has_wristband:
+            wrist_clean = filtered_df["Wristband Number"].fillna("").astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
+            wrist_clean = wrist_clean.replace(["None", "nan", "<NA>"], "")
+            wristband_mask = wrist_clean.str.contains(search_query, case=False, na=False)
+        else:
+            wristband_mask = False
 
-# 8. Backup & Export
-st.markdown("---")
-if st.button("💾 Export / Backup Data"):
-    csv_data = st.session_state.df.to_csv(index=False)
-    st.text_area("Copy updated data:", csv_data, height=150)
-    st.download_button(
-        label="Download CSV",
-        data=csv_data,
-        file_name="synced_participants.csv",
-        mime="text/csv"
+        if has_phone:
+            phone_clean = filtered_df["Phone Number"].fillna("").astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
+            phone_clean = phone_clean.replace(["None", "nan", "<NA>"], "")
+            phone_mask = phone_clean.str.contains(search_query, case=False, na=False)
+        else:
+            phone_mask = False
+
+        filtered_df = filtered_df[name_mask | wristband_mask | phone_mask]
+
+    if selected_categories and "Category" in filtered_df.columns:
+        filtered_df = filtered_df[filtered_df["Category"].astype(str).str.strip().isin(selected_categories)]
+
+    if status_filter == "Collected (Ticked)":
+        filtered_df = filtered_df[filtered_df["Status"] == True]
+    elif status_filter == "Not Collected (Unticked)":
+        filtered_df = filtered_df[filtered_df["Status"] == False]
+
+    disabled_cols = [col for col in filtered_df.columns if col not in ["Status", "WhatsApp Sent"]]
+
+    # 5. Interactive Table Editor
+    edited_df = st.data_editor(
+        filtered_df,
+        column_config={
+            "Status": st.column_config.CheckboxColumn("Status (Collected)", default=False),
+            "WhatsApp Sent": st.column_config.CheckboxColumn("📲 WS Sent?", default=False),
+            "Wristband Number": st.column_config.TextColumn("Wristband Number"),
+            "Phone Number": st.column_config.TextColumn("Phone Number"),
+            "Email address": None,
+        },
+        disabled=disabled_cols,
+        use_container_width=True,
+        key="sheet_editor"
     )
+
+    # 6. Handle Edits & Instantly Save Locally
+    if st.session_state.get("sheet_editor"):
+        edits = st.session_state["sheet_editor"]["edited_rows"]
+        if edits:
+            for row_index, changes in edits.items():
+                actual_idx = filtered_df.index[row_index]
+                if "Status" in changes:
+                    st.session_state.df.at[actual_idx, "Status"] = changes["Status"]
+                if "WhatsApp Sent" in changes:
+                    st.session_state.df.at[actual_idx, "WhatsApp Sent"] = changes["WhatsApp Sent"]
+
+            st.session_state.df.to_csv(CACHE_FILE, index=False)
+            st.rerun()
+
+    # 7. SECTION CUSTOM WHATSAPP MESSAGE
+    st.markdown("---")
+    st.subheader("📲 Send WhatsApp Confirmation")
+
+    pending_ws = st.session_state.df[(st.session_state.df["Status"] == True) & (st.session_state.df["WhatsApp Sent"] == False)]
+
+    if pending_ws.empty:
+        st.success("🎉 Semua peserta yang Collected telah dihantar WhatsApp!")
+    else:
+        def get_dropdown_label(idx):
+            p_name = pending_ws.loc[idx, "Name"] if "Name" in pending_ws.columns else "Runner"
+            if "Phone Number" in pending_ws.columns and pd.notna(pending_ws.loc[idx, "Phone Number"]):
+                p_phone = str(pending_ws.loc[idx, "Phone Number"]).strip().replace(".0", "")
+                if not p_phone or p_phone.lower() == "nan":
+                    p_phone = "N/A"
+            else:
+                p_phone = "N/A"
+            return f"⏳ {p_name} | Phone: {p_phone}"
+
+        selected_person_idx = st.selectbox(
+            "Pilih Peserta yang Belum Dihantar WhatsApp:",
+            options=pending_ws.index,
+            format_func=get_dropdown_label
+        )
+
+        if selected_person_idx is not None:
+            row = pending_ws.loc[selected_person_idx]
+
+            raw_phone = ""
+            if "Phone Number" in row and pd.notna(row["Phone Number"]):
+                raw_phone = str(row["Phone Number"]).strip().replace(".0", "")
+
+            clean_phone = "".join(filter(str.isdigit, raw_phone))
+            if clean_phone.startswith("0"):
+                clean_phone = "6" + clean_phone
+            elif clean_phone.startswith("1") and not clean_phone.startswith("60"):
+                clean_phone = "60" + clean_phone
+
+            name = row.get("Name", "Runner")
+
+            custom_message = (
+                f"Hi {name}! \n\n"
+                f"You have collected your medal! \n\n"
+                f"Congratulations on your achievement!"
+            )
+
+            encoded_msg = urllib.parse.quote(custom_message)
+            wa_url = f"https://wa.me/{clean_phone}?text={encoded_msg}"
+
+            wa_col1, wa_col2 = st.columns([3, 1])
+
+            with wa_col1:
+                st.text_area("Preview Mesej WhatsApp:", custom_message, height=150)
+
+            with wa_col2:
+                st.write(" ")
+                st.write(" ")
+                if st.link_button("🚀 SEND TO WHATSAPP", wa_url, type="primary", use_container_width=True):
+                    pass
+
+                if st.button("✅ Mark as WhatsApp Sent", use_container_width=True):
+                    st.session_state.df.at[selected_person_idx, "WhatsApp Sent"] = True
+                    st.session_state.df.to_csv(CACHE_FILE, index=False)
+                    st.toast(f"Marked WS Sent for {name}!")
+                    st.rerun()
+
+    # 8. Backup & Export
+    st.markdown("---")
+    if st.button("💾 Export / Backup Data"):
+        csv_data = st.session_state.df.to_csv(index=False)
+        st.text_area("Copy updated data:", csv_data, height=150)
+        st.download_button(
+            label="Download CSV",
+            data=csv_data,
+            file_name="synced_participants.csv",
+            mime="text/csv"
+        )
+
+# Jalankan dashboard utama
+main_tracker_ui()
