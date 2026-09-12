@@ -53,10 +53,10 @@ def clean_sheet_dataframe(raw_df):
     df_clean = df_clean.loc[:, ~df_clean.columns.str.startswith("Unnamed")]
     df_clean = df_clean.loc[:, df_clean.columns != ""]
 
-    # Buang Timestamp, Consent, dan 'Email address' (lajur Email dikekalkan)
+    # Hanya buang Timestamp, Consent & Column 7 (Email dan Email address dikekalkan)
     cols_to_drop = [
         col for col in df_clean.columns 
-        if any(term in col.lower() for term in ["timestamp", "consent", "column 7", "confirm", "setuju", "email address"])
+        if any(term in col.lower() for term in ["timestamp", "consent", "column 7", "confirm", "setuju"])
     ]
     df_clean = df_clean.drop(columns=cols_to_drop, errors="ignore")
 
@@ -147,7 +147,7 @@ def sync_data():
     df_active["WhatsApp Sent"] = df_active["WhatsApp Sent"].fillna(False).astype(str).str.lower().isin(["true", "1", "yes"])
     st.session_state.df = df_active
 
-# Fragment ini berjalan secara automatik setiap 15 saat tanpa library tambahan
+# Fragment ini berjalan secara automatik setiap 15 saat tanpa perlukan library tambahan
 @st.fragment(run_every=15)
 def main_tracker_ui():
     sync_data()
@@ -219,7 +219,7 @@ def main_tracker_ui():
 
     disabled_cols = [col for col in filtered_df.columns if col not in ["Status", "WhatsApp Sent"]]
 
-    # 5. Interactive Table Editor
+    # 5. Interactive Table Editor (Email address kini aktif semula)
     edited_df = st.data_editor(
         filtered_df,
         column_config={
@@ -227,7 +227,6 @@ def main_tracker_ui():
             "WhatsApp Sent": st.column_config.CheckboxColumn("📲 WS Sent?", default=False),
             "Wristband Number": st.column_config.TextColumn("Wristband Number"),
             "Phone Number": st.column_config.TextColumn("Phone Number"),
-            "Email address": None,
         },
         disabled=disabled_cols,
         use_container_width=True,
