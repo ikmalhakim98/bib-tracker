@@ -12,7 +12,6 @@ st.title("🏃‍♂️ Medal Engraving & Status Tracker")
 SHEET_ID = "1rvpMk2eljyUmcoW1qFh7yk4kY8AWKrygabGCe67bzxU"
 TAB_NAME = "Form responses 1"
 
-# Endpoint muat turun rasmi Google Sheets (lebih stabil berbanding gviz/tq)
 CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&sheet={urllib.parse.quote(TAB_NAME)}"
 FALLBACK_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={urllib.parse.quote(TAB_NAME)}"
 CACHE_FILE = "checked_in_cache.csv"
@@ -65,8 +64,8 @@ if "df" not in st.session_state:
     df_loaded = df_loaded.loc[:, ~df_loaded.columns.str.startswith("Unnamed")]
     df_loaded = df_loaded.loc[:, df_loaded.columns != ""]
 
-    # Remove Timestamp column if present
-    df_loaded = df_loaded.drop(columns=["Timestamp"], errors="ignore")
+    # Buang lajur Timestamp & Consent
+    df_loaded = df_loaded.drop(columns=["Timestamp", "Consent"], errors="ignore")
 
     # Column mapping selamat (Auto-detect Name, Bib, Phone tanpa duplicate)
     col_mapping = {}
@@ -162,6 +161,7 @@ edited_df = st.data_editor(
         "Status": st.column_config.CheckboxColumn("Status (Checked In)", default=False),
         "WhatsApp Sent": st.column_config.CheckboxColumn("📲 WS Sent?", default=False),
         "Bib Number": st.column_config.TextColumn("Bib Number"),
+        "Consent": None,  # Sembunyikan sekiranya masih ada dalam cache lama
     },
     disabled=disabled_cols,
     use_container_width=True,
