@@ -4,7 +4,7 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="Live Google Sheet Database", layout="wide")
-st.title("🏃‍♂️ Live Bib Search & Status Tracker")
+st.title("Medal Engraving & Status Tracker")
 
 # 1. Google Sheet Configuration
 SHEET_ID = "1rvpMk2eljyUmcoW1qFh7yk4kY8AWKrygabGCe67bzxU"
