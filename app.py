@@ -1,5 +1,6 @@
 import io
 import os
+import re
 import urllib.parse
 import urllib.request
 import pandas as pd
@@ -53,11 +54,15 @@ def clean_sheet_dataframe(raw_df):
     df_clean = df_clean.loc[:, ~df_clean.columns.str.startswith("Unnamed")]
     df_clean = df_clean.loc[:, df_clean.columns != ""]
 
-    # Hanya buang Timestamp, Consent & Column 7 (Email dan Email address dikekalkan)
-    cols_to_drop = [
-        col for col in df_clean.columns 
-        if any(term in col.lower() for term in ["timestamp", "consent", "column 7", "confirm", "setuju"])
-    ]
+    # Buang Timestamp, Consent, Column 7, dan HANYA lajur 'Email' tepat (lajur 'Email address' KEKAL)
+    cols_to_drop = []
+    for col in df_clean.columns:
+        low = col.lower().strip()
+        if any(term in low for term in ["timestamp", "consent", "column 7", "confirm", "setuju"]):
+            cols_to_drop.append(col)
+        elif low == "email":  # Buang jika namanya hanya 'email'
+            cols_to_drop.append(col)
+
     df_clean = df_clean.drop(columns=cols_to_drop, errors="ignore")
 
     col_mapping = {}
@@ -119,6 +124,10 @@ def sync_data():
     if fresh_df is not None and not fresh_df.empty:
         current_df = st.session_state.df.copy()
 
+        # Buang lajur 'Email' lama sekiranya masih terlekat dalam cache tempatan
+        if "Email" in current_df.columns:
+            current_df = current_df.drop(columns=["Email"])
+
         def create_row_id(row):
             name_val = str(row.get("Name", "")).strip().lower()
             phone_val = str(row.get("Phone Number", "")).strip()
@@ -147,7 +156,7 @@ def sync_data():
     df_active["WhatsApp Sent"] = df_active["WhatsApp Sent"].fillna(False).astype(str).str.lower().isin(["true", "1", "yes"])
     st.session_state.df = df_active
 
-# Fragment ini berjalan secara automatik setiap 15 saat tanpa perlukan library tambahan
+# Fragment auto-refresh 15 saat bawaan Streamlit
 @st.fragment(run_every=15)
 def main_tracker_ui():
     sync_data()
@@ -219,7 +228,7 @@ def main_tracker_ui():
 
     disabled_cols = [col for col in filtered_df.columns if col not in ["Status", "WhatsApp Sent"]]
 
-    # 5. Interactive Table Editor (Email address kini aktif semula)
+    # 5. Interactive Table Editor
     edited_df = st.data_editor(
         filtered_df,
         column_config={
@@ -227,6 +236,7 @@ def main_tracker_ui():
             "WhatsApp Sent": st.column_config.CheckboxColumn("📲 WS Sent?", default=False),
             "Wristband Number": st.column_config.TextColumn("Wristband Number"),
             "Phone Number": st.column_config.TextColumn("Phone Number"),
+            "Email": None,  # Sembunyikan jika masih tersisa dalam cache lama
         },
         disabled=disabled_cols,
         use_container_width=True,
