@@ -34,22 +34,22 @@ if st.sidebar.button("🚨 FORCE WIPE CACHE & LOAD FORM RESPONSES"):
     st.sidebar.success("Cache dipadam! Memuat turun data baru daripada Google Sheet...")
     st.rerun()
 
-# Helper untuk tarik CSV dengan custom browser User-Agent
+# Helper untuk tarik CSV dengan custom browser User-Agent & paksa baca sebagai string
 def fetch_sheet_csv(primary_url, fallback_url):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
         req = urllib.request.Request(primary_url, headers=headers)
         with urllib.request.urlopen(req, timeout=12) as response:
-            return pd.read_csv(io.StringIO(response.read().decode("utf-8")))
+            return pd.read_csv(io.StringIO(response.read().decode("utf-8")), dtype=str)
     except Exception:
         req = urllib.request.Request(fallback_url, headers=headers)
         with urllib.request.urlopen(req, timeout=12) as response:
-            return pd.read_csv(io.StringIO(response.read().decode("utf-8")))
+            return pd.read_csv(io.StringIO(response.read().decode("utf-8")), dtype=str)
 
 # 2. Load Data Logic
 if "df" not in st.session_state:
     if os.path.exists(CACHE_FILE):
-        df_loaded = pd.read_csv(CACHE_FILE)
+        df_loaded = pd.read_csv(CACHE_FILE, dtype=str)
     else:
         try:
             df_loaded = fetch_sheet_csv(CSV_URL, FALLBACK_URL)
@@ -95,17 +95,29 @@ if "df" not in st.session_state:
     # Buang duplicate column names jika masih wujud
     df_loaded = df_loaded.loc[:, ~df_loaded.columns.duplicated()]
 
-    # Pastikan lajur 'Status' & 'WhatsApp Sent' wujud
+    # Pastikan lajur 'Status' & 'WhatsApp Sent' wujud & convert kepada boolean
     if "Status" not in df_loaded.columns:
         df_loaded["Status"] = False
     if "WhatsApp Sent" not in df_loaded.columns:
         df_loaded["WhatsApp Sent"] = False
 
-    df_loaded["Status"] = df_loaded["Status"].fillna(False).astype(bool)
-    df_loaded["WhatsApp Sent"] = df_loaded["WhatsApp Sent"].fillna(False).astype(bool)
+    df_loaded["Status"] = df_loaded["Status"].fillna(False).astype(str).str.lower().isin(["true", "1", "yes"])
+    df_loaded["WhatsApp Sent"] = df_loaded["WhatsApp Sent"].fillna(False).astype(str).str.lower().isin(["true", "1", "yes"])
 
+    # Kekalkan leading zero untuk Wristband Number (cth: 06600)
     if "Wristband Number" in df_loaded.columns:
-        df_loaded["Wristband Number"] = df_loaded["Wristband Number"].astype(str).str.replace(r'\.0$', '', regex=True)
+        def preserve_wristband(val):
+            if pd.isna(val):
+                return None
+            s = str(val).strip().replace(".0", "")
+            if s.lower() in ["none", "nan", ""]:
+                return None
+            # Jika ada 4 digit nombor sahaja, tambah 0 di depan
+            if s.isdigit() and len(s) == 4:
+                return s.zfill(5)
+            return s
+
+        df_loaded["Wristband Number"] = df_loaded["Wristband Number"].apply(preserve_wristband)
 
     st.session_state.df = df_loaded
 
