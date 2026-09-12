@@ -1,16 +1,20 @@
+import io
 import os
 import urllib.parse
+import urllib.request
 import pandas as pd
 import streamlit as st
 
-st.set_page_config(page_title="Live Google Sheet Database", layout="wide")
-st.title("Medal Engraving & Status Tracker")
+st.set_page_config(page_title="Medal Engraving & Status Tracker", layout="wide")
+st.title("🏃‍♂️ Medal Engraving & Status Tracker")
 
 # 1. Google Sheet Configuration
 SHEET_ID = "1rvpMk2eljyUmcoW1qFh7yk4kY8AWKrygabGCe67bzxU"
 TAB_NAME = "Form responses 1"
 
-CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={TAB_NAME.replace(' ', '%20')}"
+# Endpoint muat turun rasmi Google Sheets (lebih stabil berbanding gviz/tq)
+CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&sheet={urllib.parse.quote(TAB_NAME)}"
+FALLBACK_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet={urllib.parse.quote(TAB_NAME)}"
 CACHE_FILE = "checked_in_cache.csv"
 
 # Function to wipe cache
@@ -19,7 +23,7 @@ def wipe_cache_and_reset():
         try:
             os.remove(CACHE_FILE)
         except Exception as e:
-            st.error(f"Error removing file: {e}")
+            st.error(f"Error removing cache file: {e}")
 
     for key in list(st.session_state.keys()):
         del st.session_state[key]
@@ -28,8 +32,20 @@ def wipe_cache_and_reset():
 st.sidebar.title("⚙️ Controls")
 if st.sidebar.button("🚨 FORCE WIPE CACHE & LOAD FORM RESPONSES"):
     wipe_cache_and_reset()
-    st.sidebar.success("Cache deleted! Pulling fresh data from Google Sheet...")
+    st.sidebar.success("Cache dipadam! Memuat turun data baru daripada Google Sheet...")
     st.rerun()
+
+# Helper untuk tarik CSV dengan custom browser User-Agent
+def fetch_sheet_csv(primary_url, fallback_url):
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    try:
+        req = urllib.request.Request(primary_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=12) as response:
+            return pd.read_csv(io.StringIO(response.read().decode("utf-8")))
+    except Exception:
+        req = urllib.request.Request(fallback_url, headers=headers)
+        with urllib.request.urlopen(req, timeout=12) as response:
+            return pd.read_csv(io.StringIO(response.read().decode("utf-8")))
 
 # 2. Load Data Logic
 if "df" not in st.session_state:
@@ -37,10 +53,11 @@ if "df" not in st.session_state:
         df_loaded = pd.read_csv(CACHE_FILE)
     else:
         try:
-            df_loaded = pd.read_csv(CSV_URL)
+            df_loaded = fetch_sheet_csv(CSV_URL, FALLBACK_URL)
         except Exception as e:
-            st.error(f"❌ Could not load '{TAB_NAME}' from Google Sheet.")
-            st.error("Please ensure General Access on the Google Sheet is set to 'Anyone with the link can view'.")
+            st.error(f"❌ Gagal menyambung ke '{TAB_NAME}' di Google Sheet.")
+            st.error(f"Maklumat Ralat: {e}")
+            st.info("Pastikan Google Sheet diset: **General Access -> Anyone with the link -> Viewer**.")
             st.stop()
 
     # Bersihkan nama lajur & buang lajur kosong / Unnamed
@@ -51,7 +68,7 @@ if "df" not in st.session_state:
     # Remove Timestamp column if present
     df_loaded = df_loaded.drop(columns=["Timestamp"], errors="ignore")
 
-    # Column mapping (Auto-detect Name, Bib, Phone secara selamat tanpa create duplicates)
+    # Column mapping selamat (Auto-detect Name, Bib, Phone tanpa duplicate)
     col_mapping = {}
     found_name = False
     found_bib = False
@@ -65,7 +82,7 @@ if "df" not in st.session_state:
         elif not found_bib and "bib" in low:
             col_mapping[col] = "Bib Number"
             found_bib = True
-        elif not found_phone and any(k in low for k in ["phone", "tel", "contact", "mobile", "whatsapp"]):
+        elif not found_phone and any(k in low for k in ["phone", "tel", "contact", "mobile", "whatsapp", "no tel"]):
             col_mapping[col] = "Phone Number"
             found_phone = True
 
@@ -75,7 +92,7 @@ if "df" not in st.session_state:
     # Buang duplicate column names jika masih wujud
     df_loaded = df_loaded.loc[:, ~df_loaded.columns.duplicated()]
 
-    # Ensure 'Status' & 'WhatsApp Sent' columns exist
+    # Pastikan lajur 'Status' & 'WhatsApp Sent' wujud
     if "Status" not in df_loaded.columns:
         df_loaded["Status"] = False
     if "WhatsApp Sent" not in df_loaded.columns:
@@ -91,7 +108,7 @@ if "df" not in st.session_state:
 
 df = st.session_state.df
 
-# 3. Search & Filter Controls (Multiselect Category)
+# 3. Search & Filter Controls
 col1, col2, col3 = st.columns([2, 1, 1])
 
 with col1:
@@ -119,7 +136,6 @@ with col3:
 # 4. Filter Logic
 filtered_df = df.copy()
 
-# Filter Search Query
 if search_query:
     has_name = "Name" in filtered_df.columns
     has_bib = "Bib Number" in filtered_df.columns
@@ -129,11 +145,9 @@ if search_query:
 
     filtered_df = filtered_df[name_mask | bib_mask]
 
-# Filter Category (Multiple Selection guna .isin)
 if selected_categories and "Category" in filtered_df.columns:
     filtered_df = filtered_df[filtered_df["Category"].astype(str).str.strip().isin(selected_categories)]
 
-# Filter Status
 if status_filter == "Checked In (Ticked)":
     filtered_df = filtered_df[filtered_df["Status"] == True]
 elif status_filter == "Not Checked In (Unticked)":
@@ -168,11 +182,10 @@ if st.session_state.get("sheet_editor"):
         st.session_state.df.to_csv(CACHE_FILE, index=False)
         st.rerun()
 
-# 7. SECTION CUSTOM WHATSAPP MESSAGE (Only Pending Messages Shown)
+# 7. SECTION CUSTOM WHATSAPP MESSAGE
 st.markdown("---")
 st.subheader("📲 Send WhatsApp Confirmation")
 
-# Ambil peserta yang Dah Checked In TAPIIII Belum Hantar WhatsApp
 pending_ws = st.session_state.df[(st.session_state.df["Status"] == True) & (st.session_state.df["WhatsApp Sent"] == False)]
 
 if pending_ws.empty:
@@ -197,7 +210,6 @@ else:
     if selected_person_idx is not None:
         row = pending_ws.loc[selected_person_idx]
 
-        # Clean phone format
         raw_phone = ""
         if "Phone Number" in row and pd.notna(row["Phone Number"]):
             raw_phone = str(row["Phone Number"]).strip().replace(".0", "")
@@ -209,10 +221,7 @@ else:
             clean_phone = "60" + clean_phone
 
         name = row.get("Name", "Runner")
-        wristband = str(row.get("Order ID", "-")).replace(".0", "")
-        category = str(row.get("Category", "-")).replace("nan", "-")
 
-        # Custom WhatsApp Message
         custom_message = (
             f"Hi {name}! \n\n"
             f"You have collected your medal! \n\n"
