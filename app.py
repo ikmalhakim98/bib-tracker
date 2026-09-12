@@ -188,8 +188,8 @@ else:
 
         # Custom WhatsApp Message
         custom_message = (
-            f"Hi {name}! 👋\n\n"
-            f"You have collected your medal! 🎉\n\n"
+            f"Hi {name}! \n\n"
+            f"You have collected your medal! \n\n"
             f"Congratulations on your achievement!"
         )
 
