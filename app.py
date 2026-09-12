@@ -4,9 +4,13 @@ import urllib.parse
 import urllib.request
 import pandas as pd
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="Medal Engraving & Status Tracker", layout="wide")
 st.title("🏃‍♂️ Medal Engraving & Status Tracker")
+
+# Auto-refresh aplikasi setiap 15 saat di latar belakang
+st_autorefresh(interval=15000, key="auto_sheet_sync")
 
 # 1. Google Sheet Configuration
 SHEET_ID = "1rvpMk2eljyUmcoW1qFh7yk4kY8AWKrygabGCe67bzxU"
@@ -34,7 +38,7 @@ if st.sidebar.button("🚨 FORCE WIPE CACHE & LOAD FORM RESPONSES"):
     st.sidebar.success("Cache dipadam! Memuat turun data baru daripada Google Sheet...")
     st.rerun()
 
-# Helper untuk tarik CSV dengan custom browser User-Agent & paksa baca sebagai string
+# Helper untuk tarik CSV dengan browser User-Agent & string type
 def fetch_sheet_csv(primary_url, fallback_url):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
     try:
@@ -46,38 +50,26 @@ def fetch_sheet_csv(primary_url, fallback_url):
         with urllib.request.urlopen(req, timeout=12) as response:
             return pd.read_csv(io.StringIO(response.read().decode("utf-8")), dtype=str)
 
-# 2. Load Data Logic
-if "df" not in st.session_state:
-    if os.path.exists(CACHE_FILE):
-        df_loaded = pd.read_csv(CACHE_FILE, dtype=str)
-    else:
-        try:
-            df_loaded = fetch_sheet_csv(CSV_URL, FALLBACK_URL)
-        except Exception as e:
-            st.error(f"❌ Gagal menyambung ke '{TAB_NAME}' di Google Sheet.")
-            st.error(f"Maklumat Ralat: {e}")
-            st.info("Pastikan Google Sheet diset: **General Access -> Anyone with the link -> Viewer**.")
-            st.stop()
+# Helper untuk bersihkan struktur data daripada Google Sheet
+def clean_sheet_dataframe(raw_df):
+    df_clean = raw_df.copy()
+    df_clean.columns = df_clean.columns.astype(str).str.strip()
+    df_clean = df_clean.loc[:, ~df_clean.columns.str.startswith("Unnamed")]
+    df_clean = df_clean.loc[:, df_clean.columns != ""]
 
-    # Bersihkan nama lajur & buang lajur kosong / Unnamed
-    df_loaded.columns = df_loaded.columns.astype(str).str.strip()
-    df_loaded = df_loaded.loc[:, ~df_loaded.columns.str.startswith("Unnamed")]
-    df_loaded = df_loaded.loc[:, df_loaded.columns != ""]
-
-    # Buang Timestamp, Consent, Column 7, dan KHAS untuk 'Email address' sahaja (lajur 'Email' kekal)
+    # Buang Timestamp, Consent, dan 'Email address' (lajur Email dikekalkan)
     cols_to_drop = [
-        col for col in df_loaded.columns 
+        col for col in df_clean.columns 
         if any(term in col.lower() for term in ["timestamp", "consent", "column 7", "confirm", "setuju", "email address"])
     ]
-    df_loaded = df_loaded.drop(columns=cols_to_drop, errors="ignore")
+    df_clean = df_clean.drop(columns=cols_to_drop, errors="ignore")
 
-    # Column mapping selamat (Auto-detect Name, Wristband/Bib, Phone)
     col_mapping = {}
     found_name = False
     found_wristband = False
     found_phone = False
 
-    for col in df_loaded.columns:
+    for col in df_clean.columns:
         low = col.lower()
         if not found_name and ("name" in low or "nama" in low):
             col_mapping[col] = "Name"
@@ -90,22 +82,11 @@ if "df" not in st.session_state:
             found_phone = True
 
     if col_mapping:
-        df_loaded = df_loaded.rename(columns=col_mapping)
+        df_clean = df_clean.rename(columns=col_mapping)
 
-    # Buang duplicate column names jika masih wujud
-    df_loaded = df_loaded.loc[:, ~df_loaded.columns.duplicated()]
+    df_clean = df_clean.loc[:, ~df_clean.columns.duplicated()]
 
-    # Pastikan lajur 'Status' & 'WhatsApp Sent' wujud & convert kepada boolean
-    if "Status" not in df_loaded.columns:
-        df_loaded["Status"] = False
-    if "WhatsApp Sent" not in df_loaded.columns:
-        df_loaded["WhatsApp Sent"] = False
-
-    df_loaded["Status"] = df_loaded["Status"].fillna(False).astype(str).str.lower().isin(["true", "1", "yes"])
-    df_loaded["WhatsApp Sent"] = df_loaded["WhatsApp Sent"].fillna(False).astype(str).str.lower().isin(["true", "1", "yes"])
-
-    # Bersihkan Wristband Number tanpa menambah angka 0 di depan
-    if "Wristband Number" in df_loaded.columns:
+    if "Wristband Number" in df_clean.columns:
         def clean_wristband(val):
             if pd.isna(val):
                 return None
@@ -113,12 +94,65 @@ if "df" not in st.session_state:
             if s.lower() in ["none", "nan", ""]:
                 return None
             return s
+        df_clean["Wristband Number"] = df_clean["Wristband Number"].apply(clean_wristband)
 
-        df_loaded["Wristband Number"] = df_loaded["Wristband Number"].apply(clean_wristband)
+    return df_clean
 
-    st.session_state.df = df_loaded
+# 2. Sync / Merge Data Logic
+fresh_df = None
+try:
+    fresh_raw = fetch_sheet_csv(CSV_URL, FALLBACK_URL)
+    fresh_df = clean_sheet_dataframe(fresh_raw)
+except Exception:
+    pass
 
+# Baca data sedia ada dari Session State atau Fail Cache
+if "df" not in st.session_state:
+    if os.path.exists(CACHE_FILE):
+        existing_df = pd.read_csv(CACHE_FILE, dtype=str)
+    elif fresh_df is not None:
+        fresh_df["Status"] = False
+        fresh_df["WhatsApp Sent"] = False
+        existing_df = fresh_df
+        existing_df.to_csv(CACHE_FILE, index=False)
+    else:
+        st.error(f"❌ Gagal menyambung ke '{TAB_NAME}' di Google Sheet.")
+        st.stop()
+    st.session_state.df = existing_df
+
+# Merge baris baharu dari Google Sheet tanpa menimpa status tick sedia ada
+if fresh_df is not None and not fresh_df.empty:
+    current_df = st.session_state.df.copy()
+
+    # Bina komposit ID selamat (gabungan Name + Phone + Wristband) supaya tepat
+    def create_row_id(row):
+        name_val = str(row.get("Name", "")).strip().lower()
+        phone_val = str(row.get("Phone Number", "")).strip()
+        wrist_val = str(row.get("Wristband Number", "")).strip()
+        return f"{name_val}_{phone_val}_{wrist_val}"
+
+    current_ids = set(current_df.apply(create_row_id, axis=1))
+    fresh_ids = fresh_df.apply(create_row_id, axis=1)
+
+    new_entries = fresh_df[~fresh_ids.isin(current_ids)].copy()
+
+    if not new_entries.empty:
+        new_entries["Status"] = False
+        new_entries["WhatsApp Sent"] = False
+        current_df = pd.concat([current_df, new_entries], ignore_index=True)
+        st.session_state.df = current_df
+        st.session_state.df.to_csv(CACHE_FILE, index=False)
+
+# Pastikan status wujud dalam format boolean
 df = st.session_state.df
+if "Status" not in df.columns:
+    df["Status"] = False
+if "WhatsApp Sent" not in df.columns:
+    df["WhatsApp Sent"] = False
+
+df["Status"] = df["Status"].fillna(False).astype(str).str.lower().isin(["true", "1", "yes"])
+df["WhatsApp Sent"] = df["WhatsApp Sent"].fillna(False).astype(str).str.lower().isin(["true", "1", "yes"])
+st.session_state.df = df
 
 # 3. Search & Filter Controls
 col1, col2, col3 = st.columns([2, 1, 1])
@@ -194,7 +228,7 @@ edited_df = st.data_editor(
         "WhatsApp Sent": st.column_config.CheckboxColumn("📲 WS Sent?", default=False),
         "Wristband Number": st.column_config.TextColumn("Wristband Number"),
         "Phone Number": st.column_config.TextColumn("Phone Number"),
-        "Email address": None,  # Sembunyikan sekiranya ada dalam cache
+        "Email address": None,
     },
     disabled=disabled_cols,
     use_container_width=True,
