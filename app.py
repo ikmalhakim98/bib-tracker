@@ -43,25 +43,37 @@ if "df" not in st.session_state:
             st.error("Please ensure General Access on the Google Sheet is set to 'Anyone with the link can view'.")
             st.stop()
 
-    # Clean up column whitespaces
+    # Bersihkan nama lajur & buang lajur kosong / Unnamed
     df_loaded.columns = df_loaded.columns.astype(str).str.strip()
+    df_loaded = df_loaded.loc[:, ~df_loaded.columns.str.startswith("Unnamed")]
+    df_loaded = df_loaded.loc[:, df_loaded.columns != ""]
 
     # Remove Timestamp column if present
     df_loaded = df_loaded.drop(columns=["Timestamp"], errors="ignore")
 
-    # Column mapping (Auto-detect Name, Bib, dan Phone)
+    # Column mapping (Auto-detect Name, Bib, Phone secara selamat tanpa create duplicates)
     col_mapping = {}
+    found_name = False
+    found_bib = False
+    found_phone = False
+
     for col in df_loaded.columns:
         low = col.lower()
-        if "name" in low or "nama" in low:
+        if not found_name and ("name" in low or "nama" in low):
             col_mapping[col] = "Name"
-        elif "bib" in low:
+            found_name = True
+        elif not found_bib and "bib" in low:
             col_mapping[col] = "Bib Number"
-        elif any(k in low for k in ["phone", "tel", "contact", "mobile", "whatsapp"]):
+            found_bib = True
+        elif not found_phone and any(k in low for k in ["phone", "tel", "contact", "mobile", "whatsapp"]):
             col_mapping[col] = "Phone Number"
+            found_phone = True
 
     if col_mapping:
         df_loaded = df_loaded.rename(columns=col_mapping)
+
+    # Buang duplicate column names jika masih wujud
+    df_loaded = df_loaded.loc[:, ~df_loaded.columns.duplicated()]
 
     # Ensure 'Status' & 'WhatsApp Sent' columns exist
     if "Status" not in df_loaded.columns:
@@ -166,7 +178,6 @@ pending_ws = st.session_state.df[(st.session_state.df["Status"] == True) & (st.s
 if pending_ws.empty:
     st.success("🎉 Semua peserta yang Checked In telah dihantar WhatsApp!")
 else:
-    # Function untuk format label dropdown dengan bersih
     def get_dropdown_label(idx):
         p_name = pending_ws.loc[idx, "Name"] if "Name" in pending_ws.columns else "Runner"
         if "Phone Number" in pending_ws.columns and pd.notna(pending_ws.loc[idx, "Phone Number"]):
@@ -191,7 +202,6 @@ else:
         if "Phone Number" in row and pd.notna(row["Phone Number"]):
             raw_phone = str(row["Phone Number"]).strip().replace(".0", "")
 
-        # Buang semua simbol bukan digit (+, -, ruang kosong, dll.)
         clean_phone = "".join(filter(str.isdigit, raw_phone))
         if clean_phone.startswith("0"):
             clean_phone = "6" + clean_phone
