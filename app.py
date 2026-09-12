@@ -67,10 +67,10 @@ if "df" not in st.session_state:
     # Buang lajur Timestamp & Consent
     df_loaded = df_loaded.drop(columns=["Timestamp", "Consent"], errors="ignore")
 
-    # Column mapping selamat (Auto-detect Name, Bib, Phone tanpa duplicate)
+    # Column mapping selamat (Auto-detect Name, Wristband/Wistband, Phone tanpa duplicate)
     col_mapping = {}
     found_name = False
-    found_bib = False
+    found_wristband = False
     found_phone = False
 
     for col in df_loaded.columns:
@@ -78,9 +78,9 @@ if "df" not in st.session_state:
         if not found_name and ("name" in low or "nama" in low):
             col_mapping[col] = "Name"
             found_name = True
-        elif not found_bib and "bib" in low:
-            col_mapping[col] = "Bib Number"
-            found_bib = True
+        elif not found_wristband and any(k in low for k in ["wristband", "wistband", "band", "order id", "bib"]):
+            col_mapping[col] = "Wristband Number"
+            found_wristband = True
         elif not found_phone and any(k in low for k in ["phone", "tel", "contact", "mobile", "whatsapp", "no tel"]):
             col_mapping[col] = "Phone Number"
             found_phone = True
@@ -100,8 +100,8 @@ if "df" not in st.session_state:
     df_loaded["Status"] = df_loaded["Status"].fillna(False).astype(bool)
     df_loaded["WhatsApp Sent"] = df_loaded["WhatsApp Sent"].fillna(False).astype(bool)
 
-    if "Bib Number" in df_loaded.columns:
-        df_loaded["Bib Number"] = df_loaded["Bib Number"].astype(str).str.replace(r'\.0$', '', regex=True)
+    if "Wristband Number" in df_loaded.columns:
+        df_loaded["Wristband Number"] = df_loaded["Wristband Number"].astype(str).str.replace(r'\.0$', '', regex=True)
 
     st.session_state.df = df_loaded
 
@@ -111,7 +111,7 @@ df = st.session_state.df
 col1, col2, col3 = st.columns([2, 1, 1])
 
 with col1:
-    search_query = st.text_input("Search by Name or Bib Number").strip()
+    search_query = st.text_input("Search by Name or Wristband Number").strip()
 
 with col2:
     if "Category" in df.columns:
@@ -132,22 +132,33 @@ with col3:
         options=["All", "Collected (Ticked)", "Not Collected (Unticked)"]
     )
 
-# 4. Filter Logic
+# 4. Filter Logic (Kebal Jenis Data & Carian Tepat)
 filtered_df = df.copy()
 
 if search_query:
     has_name = "Name" in filtered_df.columns
-    has_bib = "Bib Number" in filtered_df.columns
+    has_wristband = "Wristband Number" in filtered_df.columns
 
-    name_mask = filtered_df["Name"].astype(str).str.contains(search_query, case=False, na=False) if has_name else False
-    bib_mask = filtered_df["Bib Number"].astype(str).str.contains(search_query, case=False, na=False) if has_bib else False
+    if has_name:
+        name_clean = filtered_df["Name"].fillna("").astype(str).str.strip()
+        name_clean = name_clean.replace(["None", "nan", "<NA>"], "")
+        name_mask = name_clean.str.contains(search_query, case=False, na=False)
+    else:
+        name_mask = False
 
-    filtered_df = filtered_df[name_mask | bib_mask]
+    if has_wristband:
+        wrist_clean = filtered_df["Wristband Number"].fillna("").astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
+        wrist_clean = wrist_clean.replace(["None", "nan", "<NA>"], "")
+        wristband_mask = wrist_clean.str.contains(search_query, case=False, na=False)
+    else:
+        wristband_mask = False
+
+    filtered_df = filtered_df[name_mask | wristband_mask]
 
 if selected_categories and "Category" in filtered_df.columns:
     filtered_df = filtered_df[filtered_df["Category"].astype(str).str.strip().isin(selected_categories)]
 
-if status_filter == " (Ticked)":
+if status_filter == "Collected (Ticked)":
     filtered_df = filtered_df[filtered_df["Status"] == True]
 elif status_filter == "Not Collected (Unticked)":
     filtered_df = filtered_df[filtered_df["Status"] == False]
@@ -160,8 +171,8 @@ edited_df = st.data_editor(
     column_config={
         "Status": st.column_config.CheckboxColumn("Status (Collected)", default=False),
         "WhatsApp Sent": st.column_config.CheckboxColumn("📲 WS Sent?", default=False),
-        "Bib Number": st.column_config.TextColumn("Bib Number"),
-        "Consent": None,  # Sembunyikan sekiranya masih ada dalam cache lama
+        "Wristband Number": st.column_config.TextColumn("Wristband Number"),
+        "Consent": None,
     },
     disabled=disabled_cols,
     use_container_width=True,
@@ -189,7 +200,7 @@ st.subheader("📲 Send WhatsApp Confirmation")
 pending_ws = st.session_state.df[(st.session_state.df["Status"] == True) & (st.session_state.df["WhatsApp Sent"] == False)]
 
 if pending_ws.empty:
-    st.success("🎉 Semua peserta yang  telah dihantar WhatsApp!")
+    st.success("🎉 Semua peserta yang Collected telah dihantar WhatsApp!")
 else:
     def get_dropdown_label(idx):
         p_name = pending_ws.loc[idx, "Name"] if "Name" in pending_ws.columns else "Runner"
