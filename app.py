@@ -64,10 +64,10 @@ if "df" not in st.session_state:
     df_loaded = df_loaded.loc[:, ~df_loaded.columns.str.startswith("Unnamed")]
     df_loaded = df_loaded.loc[:, df_loaded.columns != ""]
 
-    # Buang lajur Timestamp & sebarang lajur berkaitan Consent / Column 7
+    # Buang Timestamp, Consent, Column 7, dan KHAS untuk 'Email address' sahaja (lajur 'Email' kekal)
     cols_to_drop = [
         col for col in df_loaded.columns 
-        if any(term in col.lower() for term in ["timestamp", "consent", "column 7", "confirm", "setuju"])
+        if any(term in col.lower() for term in ["timestamp", "consent", "column 7", "confirm", "setuju", "email address"])
     ]
     df_loaded = df_loaded.drop(columns=cols_to_drop, errors="ignore")
 
@@ -194,6 +194,7 @@ edited_df = st.data_editor(
         "WhatsApp Sent": st.column_config.CheckboxColumn("📲 WS Sent?", default=False),
         "Wristband Number": st.column_config.TextColumn("Wristband Number"),
         "Phone Number": st.column_config.TextColumn("Phone Number"),
+        "Email address": None,  # Sembunyikan sekiranya ada dalam cache
     },
     disabled=disabled_cols,
     use_container_width=True,
@@ -221,7 +222,7 @@ st.subheader("📲 Send WhatsApp Confirmation")
 pending_ws = st.session_state.df[(st.session_state.df["Status"] == True) & (st.session_state.df["WhatsApp Sent"] == False)]
 
 if pending_ws.empty:
-    st.success("Whatsapp Sent!")
+    st.success("🎉 Semua peserta yang Collected telah dihantar WhatsApp!")
 else:
     def get_dropdown_label(idx):
         p_name = pending_ws.loc[idx, "Name"] if "Name" in pending_ws.columns else "Runner"
