@@ -221,7 +221,7 @@ st.subheader("📲 Send WhatsApp Confirmation")
 pending_ws = st.session_state.df[(st.session_state.df["Status"] == True) & (st.session_state.df["WhatsApp Sent"] == False)]
 
 if pending_ws.empty:
-    st.success("🎉 Semua peserta yang Collected telah dihantar WhatsApp!")
+    st.success("Whatsapp Sent!")
 else:
     def get_dropdown_label(idx):
         p_name = pending_ws.loc[idx, "Name"] if "Name" in pending_ws.columns else "Runner"
