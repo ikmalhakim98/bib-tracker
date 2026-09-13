@@ -54,13 +54,26 @@ def clean_sheet_dataframe(raw_df):
     df_clean = df_clean.loc[:, ~df_clean.columns.str.startswith("Unnamed")]
     df_clean = df_clean.loc[:, df_clean.columns != ""]
 
-    # Buang Timestamp, Consent, Column 7, dan HANYA lajur 'Email' tepat (lajur 'Email address' KEKAL)
+    # Satukan data emel jika wujud kedua-dua 'Email' dan 'Email address'
+    has_email = "Email" in df_clean.columns
+    has_email_addr = "Email address" in df_clean.columns
+
+    if has_email and has_email_addr:
+        df_clean["Email address"] = df_clean["Email address"].fillna(df_clean["Email"])
+        df_clean["Email address"] = df_clean["Email address"].replace(["None", "nan", "<NA>", ""], pd.NA).fillna(df_clean["Email"])
+        df_clean = df_clean.drop(columns=["Email"])
+    elif has_email and not has_email_addr:
+        df_clean = df_clean.rename(columns={"Email": "Email address"})
+
+    # Buang Timestamp, Consent, Column 6, Column 7, dan sebarang terma persetujuan
     cols_to_drop = []
     for col in df_clean.columns:
         low = col.lower().strip()
-        if any(term in low for term in ["timestamp", "consent", "column 7", "confirm", "setuju"]):
+        if any(term in low for term in [
+            "timestamp", "consent", "column 6", "column 7", "confirm", "setuju", "reviewed"
+        ]):
             cols_to_drop.append(col)
-        elif low == "email":  # Buang jika namanya hanya 'email'
+        elif low == "email":  # Buang jika masih berbaki lajur Email tunggal
             cols_to_drop.append(col)
 
     df_clean = df_clean.drop(columns=cols_to_drop, errors="ignore")
@@ -124,9 +137,10 @@ def sync_data():
     if fresh_df is not None and not fresh_df.empty:
         current_df = st.session_state.df.copy()
 
-        # Buang lajur 'Email' lama sekiranya masih terlekat dalam cache tempatan
-        if "Email" in current_df.columns:
-            current_df = current_df.drop(columns=["Email"])
+        # Bersihkan Column 6 atau Email tunggal sekiranya masih tersimpan dalam cache lama
+        cols_to_purge = [c for c in current_df.columns if c.lower().strip() in ["column 6", "column 7", "email"]]
+        if cols_to_purge:
+            current_df = current_df.drop(columns=cols_to_purge)
 
         def create_row_id(row):
             name_val = str(row.get("Name", "")).strip().lower()
@@ -236,7 +250,9 @@ def main_tracker_ui():
             "WhatsApp Sent": st.column_config.CheckboxColumn("📲 WS Sent?", default=False),
             "Wristband Number": st.column_config.TextColumn("Wristband Number"),
             "Phone Number": st.column_config.TextColumn("Phone Number"),
-            "Email": None,  # Sembunyikan jika masih tersisa dalam cache lama
+            "Column 6": None,  # Perlindungan segera untuk sembunyikan Column 6
+            "Column 7": None,
+            "Email": None,
         },
         disabled=disabled_cols,
         use_container_width=True,
