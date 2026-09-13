@@ -41,14 +41,23 @@ def fetch_sheet_csv(primary_url, fallback_url):
     try:
         req = urllib.request.Request(primary_url, headers=headers)
         with urllib.request.urlopen(req, timeout=12) as response:
-            return pd.read_csv(io.StringIO(response.read().decode("utf-8")), dtype=str)
+            content = response.read().decode("utf-8")
+            if not content.strip():
+                return pd.DataFrame()
+            return pd.read_csv(io.StringIO(content), dtype=str)
     except Exception:
         req = urllib.request.Request(fallback_url, headers=headers)
         with urllib.request.urlopen(req, timeout=12) as response:
-            return pd.read_csv(io.StringIO(response.read().decode("utf-8")), dtype=str)
+            content = response.read().decode("utf-8")
+            if not content.strip():
+                return pd.DataFrame()
+            return pd.read_csv(io.StringIO(content), dtype=str)
 
 # Helper untuk bersihkan struktur data daripada Google Sheet
 def clean_sheet_dataframe(raw_df):
+    if raw_df is None or raw_df.empty:
+        return pd.DataFrame()
+
     df_clean = raw_df.copy()
     df_clean.columns = df_clean.columns.astype(str).str.strip()
     df_clean = df_clean.loc[:, ~df_clean.columns.str.startswith("Unnamed")]
@@ -73,7 +82,7 @@ def clean_sheet_dataframe(raw_df):
             "timestamp", "consent", "column 6", "column 7", "confirm", "setuju", "reviewed"
         ]):
             cols_to_drop.append(col)
-        elif low == "email":  # Buang jika masih berbaki lajur Email tunggal
+        elif low == "email":
             cols_to_drop.append(col)
 
     df_clean = df_clean.drop(columns=cols_to_drop, errors="ignore")
@@ -112,7 +121,7 @@ def clean_sheet_dataframe(raw_df):
 
     return df_clean
 
-# 2. Fungsi Sync / Merge Data Berkala
+# 2. Fungsi Sync / Merge Data Berkala (Kebal Empty File)
 def sync_data():
     fresh_df = None
     try:
@@ -122,22 +131,37 @@ def sync_data():
         pass
 
     if "df" not in st.session_state:
-        if os.path.exists(CACHE_FILE):
-            existing_df = pd.read_csv(CACHE_FILE, dtype=str)
-        elif fresh_df is not None:
-            fresh_df["Status"] = False
-            fresh_df["WhatsApp Sent"] = False
-            existing_df = fresh_df
-            existing_df.to_csv(CACHE_FILE, index=False)
-        else:
-            st.error(f"❌ Gagal menyambung ke '{TAB_NAME}' di Google Sheet.")
-            st.stop()
+        existing_df = None
+
+        # Semak jika cache wujud dan mempunyai isi (bukan 0 bytes)
+        if os.path.exists(CACHE_FILE) and os.path.getsize(CACHE_FILE) > 0:
+            try:
+                existing_df = pd.read_csv(CACHE_FILE, dtype=str)
+            except Exception:
+                # Jika fail rosak/kosong, padam dan gunakan fresh data
+                try:
+                    os.remove(CACHE_FILE)
+                except Exception:
+                    pass
+                existing_df = None
+
+        if existing_df is None or existing_df.empty:
+            if fresh_df is not None and not fresh_df.empty:
+                fresh_df["Status"] = False
+                fresh_df["WhatsApp Sent"] = False
+                existing_df = fresh_df
+                existing_df.to_csv(CACHE_FILE, index=False)
+            else:
+                st.error(f"❌ Gagal menyambung ke '{TAB_NAME}' di Google Sheet atau data kosong.")
+                st.stop()
+
         st.session_state.df = existing_df
 
+    # Merge baris baharu jika ada data segar dari Google Sheet
     if fresh_df is not None and not fresh_df.empty:
         current_df = st.session_state.df.copy()
 
-        # Bersihkan Column 6 atau Email tunggal sekiranya masih tersimpan dalam cache lama
+        # Buang Column 6 atau Email jika masih ada dalam cache lama
         cols_to_purge = [c for c in current_df.columns if c.lower().strip() in ["column 6", "column 7", "email"]]
         if cols_to_purge:
             current_df = current_df.drop(columns=cols_to_purge)
@@ -250,7 +274,7 @@ def main_tracker_ui():
             "WhatsApp Sent": st.column_config.CheckboxColumn("📲 WS Sent?", default=False),
             "Wristband Number": st.column_config.TextColumn("Wristband Number"),
             "Phone Number": st.column_config.TextColumn("Phone Number"),
-            "Column 6": None,  # Perlindungan segera untuk sembunyikan Column 6
+            "Column 6": None,
             "Column 7": None,
             "Email": None,
         },
