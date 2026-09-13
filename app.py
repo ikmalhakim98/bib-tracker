@@ -68,21 +68,19 @@ def clean_sheet_dataframe(raw_df):
     has_email_addr = "Email address" in df_clean.columns
 
     if has_email and has_email_addr:
+        df_clean["Email address"] = df_clean["Email address"].replace(["None", "nan", "<NA>", ""], pd.NA)
         df_clean["Email address"] = df_clean["Email address"].fillna(df_clean["Email"])
-        df_clean["Email address"] = df_clean["Email address"].replace(["None", "nan", "<NA>", ""], pd.NA).fillna(df_clean["Email"])
         df_clean = df_clean.drop(columns=["Email"])
     elif has_email and not has_email_addr:
         df_clean = df_clean.rename(columns={"Email": "Email address"})
 
-    # Buang Timestamp, Consent, Column 6, Column 7, dan sebarang terma persetujuan
+    # Buang Timestamp, Consent, Column 6, Column 7, dan terma persetujuan
     cols_to_drop = []
     for col in df_clean.columns:
         low = col.lower().strip()
         if any(term in low for term in [
             "timestamp", "consent", "column 6", "column 7", "confirm", "setuju", "reviewed"
         ]):
-            cols_to_drop.append(col)
-        elif low == "email":
             cols_to_drop.append(col)
 
     df_clean = df_clean.drop(columns=cols_to_drop, errors="ignore")
@@ -92,6 +90,7 @@ def clean_sheet_dataframe(raw_df):
     found_wristband = False
     found_phone = False
 
+    # 1. Pengecaman standard berdasarkan nama lajur
     for col in df_clean.columns:
         low = col.lower()
         if not found_name and ("name" in low or "nama" in low):
@@ -103,6 +102,15 @@ def clean_sheet_dataframe(raw_df):
         elif not found_phone and any(k in low for k in ["phone", "tel", "contact", "mobile", "whatsapp", "no tel"]):
             col_mapping[col] = "Phone Number"
             found_phone = True
+
+    # 2. Pemulihan jika header bertukar menjadi nombor (contoh: '7554') yang mengandungi nama peserta
+    if not found_name:
+        for col in df_clean.columns:
+            cleaned_col = str(col).strip()
+            if cleaned_col.isdigit() or re.match(r"^\d+$", cleaned_col):
+                col_mapping[col] = "Name"
+                found_name = True
+                break
 
     if col_mapping:
         df_clean = df_clean.rename(columns=col_mapping)
@@ -133,12 +141,14 @@ def sync_data():
     if "df" not in st.session_state:
         existing_df = None
 
-        # Semak jika cache wujud dan mempunyai isi (bukan 0 bytes)
         if os.path.exists(CACHE_FILE) and os.path.getsize(CACHE_FILE) > 0:
             try:
                 existing_df = pd.read_csv(CACHE_FILE, dtype=str)
+                # Bersihkan sebarang header nombor lama dalam cache
+                for c in existing_df.columns:
+                    if str(c).strip().isdigit() and "Name" not in existing_df.columns:
+                        existing_df = existing_df.rename(columns={c: "Name"})
             except Exception:
-                # Jika fail rosak/kosong, padam dan gunakan fresh data
                 try:
                     os.remove(CACHE_FILE)
                 except Exception:
@@ -161,7 +171,6 @@ def sync_data():
     if fresh_df is not None and not fresh_df.empty:
         current_df = st.session_state.df.copy()
 
-        # Buang Column 6 atau Email jika masih ada dalam cache lama
         cols_to_purge = [c for c in current_df.columns if c.lower().strip() in ["column 6", "column 7", "email"]]
         if cols_to_purge:
             current_df = current_df.drop(columns=cols_to_purge)
@@ -264,11 +273,18 @@ def main_tracker_ui():
     elif status_filter == "Not Collected (Unticked)":
         filtered_df = filtered_df[filtered_df["Status"] == False]
 
-    disabled_cols = [col for col in filtered_df.columns if col not in ["Status", "WhatsApp Sent"]]
+    # Simpan susunan index asal untuk memastikan status tick disimpan ke orang yang tepat
+    row_original_indices = list(filtered_df.index)
+
+    # Susun nombor baris supaya teratur (mula dari nombor 2 sepadan Google Sheets)
+    display_df = filtered_df.reset_index(drop=True)
+    display_df.index = display_df.index + 2
+
+    disabled_cols = [col for col in display_df.columns if col not in ["Status", "WhatsApp Sent"]]
 
     # 5. Interactive Table Editor
     edited_df = st.data_editor(
-        filtered_df,
+        display_df,
         column_config={
             "Status": st.column_config.CheckboxColumn("Status (Collected)", default=False),
             "WhatsApp Sent": st.column_config.CheckboxColumn("📲 WS Sent?", default=False),
@@ -287,12 +303,13 @@ def main_tracker_ui():
     if st.session_state.get("sheet_editor"):
         edits = st.session_state["sheet_editor"]["edited_rows"]
         if edits:
-            for row_index, changes in edits.items():
-                actual_idx = filtered_df.index[row_index]
-                if "Status" in changes:
-                    st.session_state.df.at[actual_idx, "Status"] = changes["Status"]
-                if "WhatsApp Sent" in changes:
-                    st.session_state.df.at[actual_idx, "WhatsApp Sent"] = changes["WhatsApp Sent"]
+            for row_pos, changes in edits.items():
+                if row_pos < len(row_original_indices):
+                    actual_idx = row_original_indices[row_pos]
+                    if "Status" in changes:
+                        st.session_state.df.at[actual_idx, "Status"] = changes["Status"]
+                    if "WhatsApp Sent" in changes:
+                        st.session_state.df.at[actual_idx, "WhatsApp Sent"] = changes["WhatsApp Sent"]
 
             st.session_state.df.to_csv(CACHE_FILE, index=False)
             st.rerun()
